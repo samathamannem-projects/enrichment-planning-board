@@ -5,7 +5,7 @@
   "description": "A season planning board for elementary-school enrichment programs: balance the weekly schedule across activities and grades, run a vendor sourcing pipeline, and export shareable schedules.",
   "type": "module",
   "license": "MIT",
-  "author": "Your Name <you@example.com>",
+  "author": "Samatha Mannem",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
