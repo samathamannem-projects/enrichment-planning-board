@@ -1,0 +1,26 @@
+{
+  "name": "enrichment-planning-board",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A season planning board for elementary-school enrichment programs: balance the weekly schedule across activities and grades, run a vendor sourcing pipeline, and export shareable schedules.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Your Name <you@example.com>",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "lucide-react": "^0.441.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "vite": "^5.4.8"
+  }
+}
