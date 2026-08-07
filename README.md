@@ -6,7 +6,7 @@ the whole season on one board: lay classes out across the week, balance the mix 
 activities and grade levels, run a vendor sourcing pipeline, and hand off clean,
 shareable schedules once things are settled.
 <img width="2029" height="1315" alt="Enrichment-board" src="https://github.com/user-attachments/assets/c19112cb-1042-4b8d-aec9-a7715c35e23d" />
-
+Live demo:** https://enrichment-planning-board.vercel.app
 Built as a single‑page React app with local persistence — clone it, run it, and the
 board saves your season in the browser.
 
