@@ -1,14 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   LayoutGrid, Store, CheckCircle2, Share2, Plus, Pencil, Trash2, X,
   Check, Clock, MapPin, AlertTriangle, ArrowUp, Printer, Copy, Star,
-  ChevronRight, History, User,
+  ChevronRight, History, User, Lock, LogOut, Cloud,
 } from "lucide-react";
 import { HISTORICAL_RAW } from "./historicalSeasons.js";
+import { supabase, supabaseEnabled } from "./supabaseClient.js";
 
 /* ---------------- constants ---------------- */
 
-const KEY = "enrichment-board-v2";
+const LKEY = "enrichment-board-v2";
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 const CATS = ["STEM", "Art", "Movement", "Academic"];
 const CAT_LABEL = { STEM: "STEM / Chess", Art: "Art", Movement: "Movement", Academic: "Academic" };
@@ -48,10 +49,13 @@ const firstChoice = (c) => {
   return v.filter((x) => x.status !== "declined")[0] || v[0] || null;
 };
 
-/* ---------------- seed / persistence ---------------- */
+/* ---------------- data sources ---------------- */
+// Historical seasons are always rebuilt from static code (read-only, never change).
+// Only the editable current season(s) are persisted — to Supabase when signed in,
+// otherwise to localStorage.
 
-function buildSeasons() {
-  const historical = HISTORICAL_RAW.map((s) => ({
+function historicalSeasons() {
+  return HISTORICAL_RAW.map((s) => ({
     id: genId(), name: s.name, editable: false,
     classes: s.classes.map((c) => ({
       id: genId(), ...c, status: "confirmed",
@@ -60,14 +64,46 @@ function buildSeasons() {
         : [],
     })),
   }));
-  const current = { id: genId(), name: "Fall 2026", editable: true, classes: [] };
-  return { seasons: [...historical, current], activeSeasonId: current.id };
 }
-function load() {
-  try { const raw = localStorage.getItem(KEY); if (raw) return JSON.parse(raw); } catch (_) {}
-  return buildSeasons();
+const newEditableSeason = () => ({ id: genId(), name: "Fall 2026", editable: true, classes: [] });
+const editableOf = (d) => d.seasons.filter((s) => s.editable && !s.gated);
+
+function combine(editableSeasons, activeSeasonId) {
+  const seasons = [...historicalSeasons(), ...editableSeasons];
+  if (!seasons.find((s) => s.id === activeSeasonId)) activeSeasonId = editableSeasons[0]?.id || seasons[0].id;
+  return { seasons, activeSeasonId };
 }
-function persist(d) { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch (_) {} }
+function loadLocal() {
+  try {
+    const raw = localStorage.getItem(LKEY);
+    if (raw) {
+      const p = JSON.parse(raw);
+      const editable = p.editableSeasons || (p.seasons ? p.seasons.filter((s) => s.editable) : null);
+      if (editable && editable.length) return combine(editable, p.activeSeasonId);
+    }
+  } catch (_) {}
+  return combine([newEditableSeason()], null);
+}
+function persistLocal(d) {
+  try { localStorage.setItem(LKEY, JSON.stringify({ editableSeasons: editableOf(d), activeSeasonId: d.activeSeasonId })); } catch (_) {}
+}
+async function cloudLoad() {
+  const { data: row } = await supabase.from("board_state").select("data").eq("id", "main").maybeSingle();
+  if (row && row.data && Array.isArray(row.data.editableSeasons) && row.data.editableSeasons.length) {
+    return combine(row.data.editableSeasons, row.data.activeSeasonId);
+  }
+  const ed = newEditableSeason();
+  await supabase.from("board_state").upsert({ id: "main", data: { editableSeasons: [ed], activeSeasonId: ed.id } });
+  return combine([ed], ed.id);
+}
+async function cloudSave(d) {
+  await supabase.from("board_state").upsert({ id: "main", data: { editableSeasons: editableOf(d), activeSeasonId: d.activeSeasonId }, updated_at: new Date().toISOString() });
+}
+function gatedData() {
+  const hist = historicalSeasons();
+  const gate = { id: "__gated__", name: "Fall 2026", editable: true, gated: true, classes: [] };
+  return { seasons: [...hist, gate], activeSeasonId: hist[0] ? hist[0].id : gate.id };
+}
 
 /* ---------------- atoms ---------------- */
 
@@ -334,47 +370,8 @@ function SeasonView({ classes }) {
   );
 }
 
-/* ---------------- share views ---------------- */
+/* ---------------- share + shared table ---------------- */
 
-function ShareView({ classes, seasonName }) {
-  const [mode, setMode] = useState("proposed");
-  const [copied, setCopied] = useState(false);
-  const rows = mode === "principal" ? classes.filter((c) => c.status === "confirmed") : classes.filter((c) => c.status !== "idea");
-  const ordered = [...rows].sort((a, b) => DAYS.indexOf(a.day) - DAYS.indexOf(b.day) || (a.start || "").localeCompare(b.start || ""));
-  const asText = () => {
-    const title = mode === "principal" ? `${seasonName} — Confirmed Enrichment Classes` : `${seasonName} — Proposed Enrichment Schedule (for review)`;
-    return `${title}\n\n` + ordered.map((c) => {
-      const fc = firstChoice(c);
-      return `${c.day}  ${fmtTime(c.start)}  ${c.name} (${CAT_LABEL[c.type]}, ${c.band}) — ${c.room || "TBD"}${fc ? ` — ${fc.name}` : ""} [${STATUS[c.status].label}]`;
-    }).join("\n");
-  };
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(asText()); setCopied(true); setTimeout(() => setCopied(false), 1800); }
-    catch (_) { window.prompt("Copy the text below:", asText()); }
-  };
-  return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-lg border border-slate-200 p-0.5">
-          <button onClick={() => setMode("proposed")} className={`rounded-md px-3 py-1.5 text-sm font-medium ${mode === "proposed" ? "bg-blue-600 text-white" : "text-slate-600"}`}>Proposed schedule</button>
-          <button onClick={() => setMode("principal")} className={`rounded-md px-3 py-1.5 text-sm font-medium ${mode === "principal" ? "bg-blue-600 text-white" : "text-slate-600"}`}>Principal roster</button>
-        </div>
-        <div className="ml-auto flex gap-2">
-          <button onClick={copy} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"><Copy size={14} /> {copied ? "Copied!" : "Copy as text"}</button>
-          <button onClick={() => window.print()} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"><Printer size={14} /> Print</button>
-        </div>
-      </div>
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <h3 className="text-lg font-bold text-slate-800">{seasonName} — {mode === "principal" ? "Confirmed Enrichment Classes" : "Proposed Enrichment Schedule"}</h3>
-        <p className="mb-4 text-xs text-slate-400">{mode === "principal" ? "Locked in for the season." : "Draft for review — subject to vendor confirmation."}</p>
-        <ClassTable rows={ordered} showStatus={mode === "proposed"} />
-        {ordered.length === 0 && <p className="py-6 text-center text-sm text-slate-400">Nothing to show yet.</p>}
-      </div>
-    </div>
-  );
-}
-
-/* shared table used by Share + Historical details */
 function ClassTable({ rows, showStatus, historical }) {
   return (
     <table className="w-full text-sm">
@@ -418,6 +415,44 @@ function ClassTable({ rows, showStatus, historical }) {
   );
 }
 
+function ShareView({ classes, seasonName }) {
+  const [mode, setMode] = useState("proposed");
+  const [copied, setCopied] = useState(false);
+  const rows = mode === "principal" ? classes.filter((c) => c.status === "confirmed") : classes.filter((c) => c.status !== "idea");
+  const ordered = [...rows].sort((a, b) => DAYS.indexOf(a.day) - DAYS.indexOf(b.day) || (a.start || "").localeCompare(b.start || ""));
+  const asText = () => {
+    const title = mode === "principal" ? `${seasonName} — Confirmed Enrichment Classes` : `${seasonName} — Proposed Enrichment Schedule (for review)`;
+    return `${title}\n\n` + ordered.map((c) => {
+      const fc = firstChoice(c);
+      return `${c.day}  ${fmtTime(c.start)}  ${c.name} (${CAT_LABEL[c.type]}, ${c.band}) — ${c.room || "TBD"}${fc ? ` — ${fc.name}` : ""} [${STATUS[c.status].label}]`;
+    }).join("\n");
+  };
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(asText()); setCopied(true); setTimeout(() => setCopied(false), 1800); }
+    catch (_) { window.prompt("Copy the text below:", asText()); }
+  };
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="inline-flex rounded-lg border border-slate-200 p-0.5">
+          <button onClick={() => setMode("proposed")} className={`rounded-md px-3 py-1.5 text-sm font-medium ${mode === "proposed" ? "bg-blue-600 text-white" : "text-slate-600"}`}>Proposed schedule</button>
+          <button onClick={() => setMode("principal")} className={`rounded-md px-3 py-1.5 text-sm font-medium ${mode === "principal" ? "bg-blue-600 text-white" : "text-slate-600"}`}>Principal roster</button>
+        </div>
+        <div className="ml-auto flex gap-2">
+          <button onClick={copy} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"><Copy size={14} /> {copied ? "Copied!" : "Copy as text"}</button>
+          <button onClick={() => window.print()} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"><Printer size={14} /> Print</button>
+        </div>
+      </div>
+      <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <h3 className="text-lg font-bold text-slate-800">{seasonName} — {mode === "principal" ? "Confirmed Enrichment Classes" : "Proposed Enrichment Schedule"}</h3>
+        <p className="mb-4 text-xs text-slate-400">{mode === "principal" ? "Locked in for the season." : "Draft for review — subject to vendor confirmation."}</p>
+        <div className="overflow-x-auto"><ClassTable rows={ordered} showStatus={mode === "proposed"} /></div>
+        {ordered.length === 0 && <p className="py-6 text-center text-sm text-slate-400">Nothing to show yet.</p>}
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- historical (read-only) season ---------------- */
 
 function HistoricalSeason({ season }) {
@@ -428,14 +463,12 @@ function HistoricalSeason({ season }) {
   const cap = completed.reduce((a, c) => a + (c.capacity || 0), 0);
   const fill = cap ? Math.round((enrolled / cap) * 100) : 0;
   const ordered = [...cls].sort((a, b) => DAYS.indexOf(a.day) - DAYS.indexOf(b.day) || (a.start || "").localeCompare(b.start || ""));
-
   const Stat = ({ label, value }) => (
     <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
       <div className="text-xl font-bold text-slate-800">{value}</div>
       <div className="text-xs text-slate-500">{label}</div>
     </div>
   );
-
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-600"><History size={15} /> Historical season — read only. Switch to a current season to make edits.</div>
@@ -445,9 +478,7 @@ function HistoricalSeason({ season }) {
         <Stat label="Cancelled" value={cancelled.length} />
         <Stat label="Seats filled" value={`${fill}%`} />
       </div>
-      <div className="rounded-2xl border border-slate-200 bg-white p-4">
-        <PlanBoard classes={cls} readOnly />
-      </div>
+      <div className="rounded-2xl border border-slate-200 bg-white p-4"><PlanBoard classes={cls} readOnly /></div>
       <div className="rounded-2xl border border-slate-200 bg-white p-5">
         <h3 className="mb-3 text-sm font-semibold text-slate-700">All classes</h3>
         <div className="overflow-x-auto"><ClassTable rows={ordered} historical /></div>
@@ -456,17 +487,81 @@ function HistoricalSeason({ season }) {
   );
 }
 
+/* ---------------- sign-in gate ---------------- */
+
+function SignInCard({ email, setEmail, onSend, sent, busy }) {
+  return (
+    <div className="mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center">
+      <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-blue-50 text-blue-600"><Lock size={22} /></div>
+      <h3 className="text-lg font-semibold text-slate-800">Staff sign-in</h3>
+      <p className="mt-1 text-sm text-slate-500">The current season is private and synced. Enter your email and we'll send a one-time sign-in link.</p>
+      {sent ? (
+        <div className="mt-5 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-700">Check your email for the sign-in link, then come back to this page.</div>
+      ) : (
+        <div className="mt-5 flex gap-2">
+          <input className={inputCls} type="email" placeholder="you@school.org" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onSend()} />
+          <button disabled={busy} onClick={onSend} className="whitespace-nowrap rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{busy ? "Sending…" : "Send link"}</button>
+        </div>
+      )}
+      <p className="mt-4 text-xs text-slate-400">Historical seasons are open to view without signing in.</p>
+    </div>
+  );
+}
+
 /* ---------------- main ---------------- */
 
 export default function EnrichmentBoard() {
-  const [data, setData] = useState(load);
+  const [session, setSession] = useState(null);
+  const [authReady, setAuthReady] = useState(!supabaseEnabled);
+  const [data, setData] = useState(supabaseEnabled ? null : loadLocal);
   const [tab, setTab] = useState("plan");
   const [dragId, setDragId] = useState(null);
   const [form, setForm] = useState(null);
-  useEffect(() => persist(data), [data]);
+  const [email, setEmail] = useState("");
+  const [linkSent, setLinkSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const saveTimer = useRef(null);
+
+  // auth init
+  useEffect(() => {
+    if (!supabaseEnabled) return;
+    supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setAuthReady(true); });
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  // load data (cloud) when auth state resolves
+  useEffect(() => {
+    if (!supabaseEnabled || !authReady) return;
+    if (session) { setData(null); cloudLoad().then(setData).catch(() => setData(gatedData())); }
+    else { setData(gatedData()); setTab("plan"); }
+  }, [session, authReady]);
+
+  // save on change
+  useEffect(() => {
+    if (!data) return;
+    if (!supabaseEnabled) { persistLocal(data); return; }
+    if (session) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => { cloudSave(data).catch(() => {}); }, 800);
+    }
+  }, [data]);
+
+  const sendLink = async () => {
+    if (!email.trim()) return;
+    setBusy(true);
+    const { error } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: window.location.origin } });
+    setBusy(false);
+    if (error) alert(error.message); else setLinkSent(true);
+  };
+  const signOut = async () => { await supabase.auth.signOut(); setLinkSent(false); setEmail(""); };
+
+  if (supabaseEnabled && !authReady) return <div className="flex h-64 items-center justify-center text-slate-400">Connecting…</div>;
+  if (!data) return <div className="flex h-64 items-center justify-center text-slate-400">Syncing…</div>;
 
   const season = data.seasons.find((s) => s.id === data.activeSeasonId) || data.seasons[data.seasons.length - 1];
   const classes = season.classes;
+  const canEdit = season.editable && !season.gated;
   const setClasses = (updater) => setData((d) => ({ ...d, seasons: d.seasons.map((s) => (s.id === season.id ? { ...s, classes: updater(s.classes) } : s)) }));
 
   const upsert = (c) => { setClasses((list) => (list.some((x) => x.id === c.id) ? list.map((x) => (x.id === c.id ? c : x)) : [...list, { ...c, id: genId() }])); setForm(null); };
@@ -475,9 +570,10 @@ export default function EnrichmentBoard() {
   const setClassVendors = (id, vendors) => setClasses((list) => list.map((c) => (c.id === id ? { ...c, vendors } : c)));
   const dropCell = (day, type) => { if (dragId) setClasses((list) => list.map((c) => (c.id === dragId ? { ...c, day, type } : c))); setDragId(null); };
   const addToCell = (day, type) => setForm({ name: "", type, band: "All", day, start: "15:15", end: "16:15", room: "", status: "proposed", vendors: [] });
-  const resetAll = () => { if (window.confirm("Reset everything, including the current season, back to the imported data?")) setData(buildSeasons()); };
+  const resetSeason = () => { if (window.confirm("Reset the current season back to empty?")) { const ed = newEditableSeason(); setData({ seasons: [...historicalSeasons(), ed], activeSeasonId: ed.id }); } };
+  const goSignIn = () => { const g = data.seasons.find((s) => s.gated); if (g) setData((d) => ({ ...d, activeSeasonId: g.id })); };
 
-  const needVendor = season.editable ? classes.filter((c) => (c.vendors || []).length === 0).length : 0;
+  const needVendor = canEdit ? classes.filter((c) => (c.vendors || []).length === 0).length : 0;
 
   const TabBtn = ({ id, icon: Icon, label, badge }) => (
     <button onClick={() => setTab(id)} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${tab === id ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
@@ -495,20 +591,24 @@ export default function EnrichmentBoard() {
               <span className="grid h-8 w-8 place-items-center rounded-lg bg-blue-600 text-white"><LayoutGrid size={18} /></span>
               Enrichment Planning Board
             </h1>
-            <p className="mt-0.5 text-sm text-slate-500">{season.editable ? "Planning the upcoming season" : "Mann Elementary · past season"}</p>
+            <p className="mt-0.5 flex items-center gap-1.5 text-sm text-slate-500">
+              {season.gated ? "Sign in to plan the current season" : season.editable ? "Planning the upcoming season" : "Mann Elementary · past season"}
+              {supabaseEnabled && session && !season.gated && <span className="flex items-center gap-1 text-emerald-600"><Cloud size={13} /> synced</span>}
+            </p>
           </div>
           <div className="flex items-center gap-2">
-            <select
-              value={data.activeSeasonId}
-              onChange={(e) => { setData((d) => ({ ...d, activeSeasonId: e.target.value })); setTab("plan"); }}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 focus:border-blue-400 focus:outline-none"
-            >
-              {data.seasons.map((s) => <option key={s.id} value={s.id}>{s.name}{s.editable ? "  (current)" : ""}</option>)}
+            <select value={data.activeSeasonId} onChange={(e) => { setData((d) => ({ ...d, activeSeasonId: e.target.value })); setTab("plan"); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 focus:border-blue-400 focus:outline-none">
+              {data.seasons.map((s) => <option key={s.id} value={s.id}>{s.name}{s.gated ? "  (sign in)" : s.editable ? "  (current)" : ""}</option>)}
             </select>
+            {supabaseEnabled && (session
+              ? <button onClick={signOut} title={session.user?.email} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"><LogOut size={15} /> Sign out</button>
+              : <button onClick={goSignIn} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"><Lock size={15} /> Staff sign-in</button>)}
           </div>
         </div>
 
-        {season.editable ? (
+        {season.gated ? (
+          <div className="py-6"><SignInCard email={email} setEmail={setEmail} onSend={sendLink} sent={linkSent} busy={busy} /></div>
+        ) : canEdit ? (
           <>
             <div className="mb-4 flex flex-wrap items-center gap-1.5">
               <TabBtn id="plan" icon={LayoutGrid} label="Plan" />
@@ -516,7 +616,6 @@ export default function EnrichmentBoard() {
               <TabBtn id="season" icon={CheckCircle2} label="Season" />
               <TabBtn id="share" icon={Share2} label="Share" />
             </div>
-
             {tab === "plan" && (
               <div>
                 <div className="mb-3 flex justify-end">
@@ -536,9 +635,11 @@ export default function EnrichmentBoard() {
           <HistoricalSeason season={season} />
         )}
 
-        <div className="mt-6 flex justify-end">
-          <button onClick={resetAll} className="text-xs text-slate-400 hover:text-slate-600">Reset data</button>
-        </div>
+        {canEdit && (
+          <div className="mt-6 flex justify-end">
+            <button onClick={resetSeason} className="text-xs text-slate-400 hover:text-slate-600">Reset current season</button>
+          </div>
+        )}
       </div>
 
       {form && <ClassForm initial={form} onSave={upsert} onClose={() => setForm(null)} />}
