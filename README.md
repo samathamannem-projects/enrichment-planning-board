@@ -5,14 +5,13 @@ enrichment season. Instead of juggling spreadsheets and email threads, you compo
 the whole season on one board: lay classes out across the week, balance the mix of
 activities and grade levels, run a vendor sourcing pipeline, and hand off clean,
 shareable schedules once things are settled.
-<img width="2029" height="1315" alt="Enrichment-board" src="https://github.com/user-attachments/assets/c19112cb-1042-4b8d-aec9-a7715c35e23d" />
-Live demo:** https://enrichment-planning-board.vercel.app
+
 Built as a single‑page React app with local persistence — clone it, run it, and the
 board saves your season in the browser.
 
-> **Note on sample data:** the app ships seeded with a half‑planned season so every
-> view has something to show. Use *Reset to sample season* to restore it, or clear it
-> and start your own.
+> **Seeded with real data:** the app opens with three completed seasons (Fall 2025,
+> Winter 2026, Spring 2026 — 51 classes) imported from Homeroom exports as read-only
+> historical boards, plus an empty, editable current season to plan the next one.
 
 ## Why it exists
 
@@ -36,8 +35,16 @@ lenses**, which is the idea the whole design is organized around.
   separated from what's still in planning.
 - **Share views** — generate a **Proposed schedule** (draft, for team review) and a
   **Principal roster** (confirmed only), each printable and copyable as text.
-- **Local persistence** — the board autosaves to `localStorage`; no account or backend
-  required to try it.
+- **Multiple seasons** — a season switcher moves between past terms and the current one.
+  Past seasons are **read-only historical boards** showing what actually ran — category,
+  grades, room, instructor, vendor, final enrollment, and Completed/Cancelled outcome —
+  with summary stats (seats filled, cancellations). The current season is fully editable.
+- **Cloud sync + staff login** — with a Supabase project configured, the current season
+  is stored in Postgres and gated behind a passwordless email (magic-link) login, so a few
+  staff can view and edit the same season from any device. Historical seasons stay open to
+  view without signing in.
+- **Local-first fallback** — with no backend configured, the app autosaves the current
+  season to `localStorage` and runs with no login, so it works out of the box.
 
 ## Tech stack
 
@@ -45,7 +52,7 @@ lenses**, which is the idea the whole design is organized around.
 - **Vite** for dev server and build
 - **Tailwind CSS** for styling
 - **lucide-react** for icons
-- **localStorage** for persistence
+- **Supabase** (Postgres + passwordless auth) for cloud sync, with a `localStorage` fallback
 
 ## Getting started
 
@@ -96,9 +103,38 @@ Natural next steps if this grew beyond a single planner:
 
 - A backend + auth so a few staff can share and co‑edit one season in real time
 - Sending the proposed schedule / roster by email directly from the app
-- Multiple seasons / terms and archiving
+- Creating and duplicating new seasons from within the app (historical view already ships)
+- Importing a Homeroom CSV directly in the browser to spin up a new historical season
 - A dedicated drag‑and‑drop library for richer reordering and keyboard accessibility
 - Unit tests around the coverage and vendor‑ranking logic
+
+## Cloud sync setup (optional)
+
+The app runs with no backend (local storage, no login). To enable multi-device sync with a
+staff login, create a free [Supabase](https://supabase.com) project and:
+
+1. In the SQL editor, create the table and access policies:
+
+   ```sql
+   create table if not exists board_state (
+     id text primary key,
+     data jsonb not null default '{}'::jsonb,
+     updated_at timestamptz not null default now()
+   );
+   alter table board_state enable row level security;
+   create policy "authenticated read"   on board_state for select to authenticated using (true);
+   create policy "authenticated insert" on board_state for insert to authenticated with check (true);
+   create policy "authenticated update" on board_state for update to authenticated using (true) with check (true);
+   ```
+
+2. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (from Project Settings → API) as
+   environment variables in your host (e.g. Vercel), then redeploy. See `.env.example`.
+
+3. In Supabase Auth, set the Site URL to your deployed URL, disable open sign-ups, and invite
+   your staff by email so only they can sign in.
+
+The anon key is a publishable client key by design — access is enforced by Row Level Security
+and auth, not by hiding it.
 
 ## License
 
