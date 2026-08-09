@@ -1,4 +1,5 @@
-// Auto-generated from Homeroom season exports (Mann Elementary). Historical, read-only.
+// Auto-generated from Homeroom exports (Mann Elementary). Historical, read-only.
+// Includes a year-round Music season and aggregate parent feedback (no personal info).
 export const HISTORICAL_RAW = [
   {
     "name": "Fall 2025",
@@ -15,7 +16,8 @@ export const HISTORICAL_RAW = [
         "provider": "Horace Mann PTSA",
         "enrolled": 24,
         "capacity": 23,
-        "outcome": "Completed"
+        "outcome": "Completed",
+        "feedback": "★ 4.5 · 2 responses · 0% would repeat"
       },
       {
         "name": "Indoor Soccer",
@@ -29,7 +31,8 @@ export const HISTORICAL_RAW = [
         "provider": "B&B Solutions",
         "enrolled": 19,
         "capacity": 20,
-        "outcome": "Completed"
+        "outcome": "Completed",
+        "feedback": "★ 5.0 · 1 response · 100% would repeat"
       },
       {
         "name": "Floor Hockey",
@@ -43,7 +46,8 @@ export const HISTORICAL_RAW = [
         "provider": "B&B Solutions",
         "enrolled": 12,
         "capacity": 20,
-        "outcome": "Completed"
+        "outcome": "Completed",
+        "feedback": "★ 3.2 · 4 responses · 25% would repeat"
       },
       {
         "name": "Game Development from Start to Finish",
@@ -57,7 +61,8 @@ export const HISTORICAL_RAW = [
         "provider": "Open World",
         "enrolled": 10,
         "capacity": 15,
-        "outcome": "Completed"
+        "outcome": "Completed",
+        "feedback": "★ 4.3 · 3 responses · 33% would repeat"
       },
       {
         "name": "Rainy Day Dinner Club",
@@ -71,7 +76,8 @@ export const HISTORICAL_RAW = [
         "provider": "Rainy Day Dinner Club",
         "enrolled": 14,
         "capacity": 16,
-        "outcome": "Completed"
+        "outcome": "Completed",
+        "feedback": "★ 5.0 · 3 responses · 67% would repeat"
       },
       {
         "name": "Game Design for Young Programmers",
@@ -99,7 +105,8 @@ export const HISTORICAL_RAW = [
         "provider": "Creatstudioz",
         "enrolled": 15,
         "capacity": 21,
-        "outcome": "Completed"
+        "outcome": "Completed",
+        "feedback": "★ 4.0 · 2 responses · 50% would repeat"
       },
       {
         "name": "Chess Club",
@@ -113,7 +120,8 @@ export const HISTORICAL_RAW = [
         "provider": "Orlov Chess Academy",
         "enrolled": 16,
         "capacity": 16,
-        "outcome": "Completed"
+        "outcome": "Completed",
+        "feedback": "★ 4.2 · 5 responses · 80% would repeat"
       },
       {
         "name": "Chess Club",
@@ -127,7 +135,8 @@ export const HISTORICAL_RAW = [
         "provider": "Orlov Chess Academy",
         "enrolled": 17,
         "capacity": 16,
-        "outcome": "Completed"
+        "outcome": "Completed",
+        "feedback": "★ 2.0 · 1 response · 0% would repeat"
       },
       {
         "name": "Volcano Island",
@@ -141,7 +150,8 @@ export const HISTORICAL_RAW = [
         "provider": "Challenge Island of Greater Seattle",
         "enrolled": 18,
         "capacity": 16,
-        "outcome": "Completed"
+        "outcome": "Completed",
+        "feedback": "★ 4.0 · 5 responses · 40% would repeat"
       },
       {
         "name": "Hip Hop Dance",
@@ -155,7 +165,8 @@ export const HISTORICAL_RAW = [
         "provider": "Dukane Studios",
         "enrolled": 30,
         "capacity": 30,
-        "outcome": "Completed"
+        "outcome": "Completed",
+        "feedback": "★ 4.0 · 1 response · 0% would repeat"
       },
       {
         "name": "Spanish Immersion Class",
@@ -216,7 +227,8 @@ export const HISTORICAL_RAW = [
         "provider": "Sing and Play Productions",
         "enrolled": 19,
         "capacity": 22,
-        "outcome": "Completed"
+        "outcome": "Completed",
+        "feedback": "★ 5.0 · 2 responses · 100% would repeat"
       },
       {
         "name": "Create. Explore. Inspire. – Artists of the Northwest",
@@ -398,7 +410,8 @@ export const HISTORICAL_RAW = [
         "provider": "Excel With Chess",
         "enrolled": 13,
         "capacity": 26,
-        "outcome": "Completed"
+        "outcome": "Completed",
+        "feedback": "★ 5.0 · 1 response · 100% would repeat"
       },
       {
         "name": "Math Club (4-5)",
@@ -440,7 +453,8 @@ export const HISTORICAL_RAW = [
         "provider": "Horace Mann PTSA",
         "enrolled": 13,
         "capacity": 12,
-        "outcome": "Completed"
+        "outcome": "Completed",
+        "feedback": "★ 5.0 · 1 response · 100% would repeat"
       },
       {
         "name": "Crafts & Games",
@@ -726,6 +740,87 @@ export const HISTORICAL_RAW = [
         "enrolled": 9,
         "capacity": 20,
         "outcome": "Completed"
+      }
+    ]
+  },
+  {
+    "name": "Music (2025–26)",
+    "yearLong": true,
+    "classes": [
+      {
+        "name": "Choir",
+        "type": "Art",
+        "band": "3-5",
+        "day": "Wed",
+        "start": "08:15",
+        "end": "09:10",
+        "room": "Music Room",
+        "instructor": "Brad McRae",
+        "provider": "",
+        "enrolled": 67,
+        "capacity": 55,
+        "outcome": "Completed",
+        "feedback": "★ 4.8 · 6 responses · 100% would repeat"
+      },
+      {
+        "name": "Beginner Orchestra",
+        "type": "Art",
+        "band": "2-5",
+        "day": "Mon",
+        "start": "16:05",
+        "end": "17:05",
+        "room": "Music Room",
+        "instructor": "Courtney Yeates",
+        "provider": "Fifth Symphony Music",
+        "enrolled": 21,
+        "capacity": 50,
+        "outcome": "Completed",
+        "feedback": "★ 5.0 · 4 responses · 100% would repeat"
+      },
+      {
+        "name": "Intermediate Orchestra",
+        "type": "Art",
+        "band": "2-5",
+        "day": "Wed",
+        "start": "14:35",
+        "end": "15:35",
+        "room": "Room 118",
+        "instructor": "Courtney Yeates",
+        "provider": "Fifth Symphony Music",
+        "enrolled": 10,
+        "capacity": 30,
+        "outcome": "Completed",
+        "feedback": "★ 5.0 · 4 responses · 100% would repeat"
+      },
+      {
+        "name": "Band",
+        "type": "Art",
+        "band": "3-5",
+        "day": "Tue",
+        "start": "16:05",
+        "end": "17:05",
+        "room": "Music Room",
+        "instructor": "Shannon Nelson",
+        "provider": "",
+        "enrolled": 11,
+        "capacity": 15,
+        "outcome": "Completed",
+        "feedback": "★ 4.2 · 5 responses · 60% would repeat"
+      },
+      {
+        "name": "Band",
+        "type": "Art",
+        "band": "3-5",
+        "day": "Thu",
+        "start": "16:05",
+        "end": "17:05",
+        "room": "Music Room",
+        "instructor": "Shannon Nelson",
+        "provider": "",
+        "enrolled": 10,
+        "capacity": 15,
+        "outcome": "Completed",
+        "feedback": "★ 4.2 · 5 responses · 60% would repeat"
       }
     ]
   }
