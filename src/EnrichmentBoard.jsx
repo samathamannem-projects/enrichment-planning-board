@@ -186,6 +186,11 @@ function ClassForm({ initial, onSave, onClose }) {
       ? `Loaded “${e.name}” — ${e.vendors.length} past vendor${e.vendors.length > 1 ? "s" : ""} added as candidate${e.vendors.length > 1 ? "s" : ""} to contact. Set the day, time, and room below.`
       : `Loaded “${e.name}”. Set the day, time, and room below.`);
   };
+  const vSet = (vs) => setF((p) => ({ ...p, vendors: vs }));
+  const vUpd = (id, next) => vSet((f.vendors || []).map((v) => (v.id === id ? next : v)));
+  const vAdd = () => vSet([...(f.vendors || []), { id: genId(), name: "", status: "to_contact", preferredDays: [], contact: "", notes: "" }]);
+  const vRm = (id) => vSet((f.vendors || []).filter((v) => v.id !== id));
+  const vPromote = (id) => { const v = (f.vendors || []).find((x) => x.id === id); vSet([v, ...(f.vendors || []).filter((x) => x.id !== id)]); };
   return (
     <Modal title={f.id ? "Edit class" : "Add class"} onClose={onClose} wide>
       {!f.id && <CatalogPicker onPick={pick} />}
@@ -199,6 +204,25 @@ function ClassForm({ initial, onSave, onClose }) {
         <Field label="Start time"><input type="time" className={inputCls} value={f.start} onChange={(e) => set("start", e.target.value)} /></Field>
         <Field label="End time"><input type="time" className={inputCls} value={f.end} onChange={(e) => set("end", e.target.value)} /></Field>
         <div className="col-span-2"><Field label="Status"><select className={inputCls} value={f.status} onChange={(e) => set("status", e.target.value)}>{Object.keys(STATUS).map((s) => <option key={s} value={s}>{STATUS[s].label}</option>)}</select></Field></div>
+      </div>
+      <div className="mt-4">
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="text-xs font-medium text-slate-600">Vendors</span>
+          <button onClick={vAdd} className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700"><Plus size={12} /> Add vendor</button>
+        </div>
+        {(f.vendors || []).length === 0 && <p className="text-xs text-slate-400">No vendor yet — add one here, or manage candidates later in the Vendors tab.</p>}
+        <div className="space-y-1.5">
+          {(f.vendors || []).map((v, i) => (
+            <div key={v.id} className="flex items-center gap-2">
+              {i === 0
+                ? <Star size={13} className="shrink-0 fill-amber-400 text-amber-400" title="First choice" />
+                : <button onClick={() => vPromote(v.id)} title="Make first choice" className="shrink-0 rounded p-0.5 text-slate-300 hover:text-amber-500"><ArrowUp size={13} /></button>}
+              <input className={inputCls + " flex-1"} placeholder="Vendor name" value={v.name} onChange={(e) => vUpd(v.id, { ...v, name: e.target.value })} />
+              <select value={v.status} onChange={(e) => vUpd(v.id, { ...v, status: e.target.value })} className={`shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-xs font-medium ${V_STATUS[v.status].cls}`}>{V_ORDER.map((s) => <option key={s} value={s}>{V_STATUS[s].label}</option>)}</select>
+              <button onClick={() => vRm(v.id)} className="shrink-0 rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500"><Trash2 size={14} /></button>
+            </div>
+          ))}
+        </div>
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
@@ -329,7 +353,7 @@ function VendorRow({ v, first, onUpdate, onRemove, onPromote }) {
       <div className="flex items-center gap-2">
         {first ? <Star size={14} className="shrink-0 fill-amber-400 text-amber-400" title="First choice" />
           : <button onClick={onPromote} title="Make first choice" className="shrink-0 rounded p-0.5 text-slate-300 hover:text-amber-500"><ArrowUp size={14} /></button>}
-        <input className="flex-1 rounded border border-transparent px-1 py-0.5 text-sm font-medium text-slate-800 hover:border-slate-200 focus:border-blue-300 focus:outline-none" value={v.name} onChange={(e) => onUpdate({ ...v, name: e.target.value })} />
+        <input className="flex-1 rounded border border-slate-200 px-2 py-1 text-sm font-medium text-slate-800 focus:border-blue-300 focus:outline-none" value={v.name} onChange={(e) => onUpdate({ ...v, name: e.target.value })} />
         <select value={v.status} onChange={(e) => onUpdate({ ...v, status: e.target.value })} className={`rounded px-2 py-1 text-xs font-medium ${V_STATUS[v.status].cls}`}>{V_ORDER.map((s) => <option key={s} value={s}>{V_STATUS[s].label}</option>)}</select>
         <button onClick={onRemove} className="shrink-0 rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500"><Trash2 size={13} /></button>
       </div>
