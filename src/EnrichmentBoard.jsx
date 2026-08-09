@@ -49,6 +49,20 @@ const firstChoice = (c) => {
   return v.filter((x) => x.status !== "declined")[0] || v[0] || null;
 };
 
+// Catalog of past classes for reuse. Grade variants stay separate; exact repeats
+// across seasons collapse into one entry, gathering every vendor that ran it.
+function buildCatalog() {
+  const map = new Map();
+  for (const s of HISTORICAL_RAW) for (const c of s.classes) {
+    const key = `${c.name}||${c.type}||${c.band}`;
+    if (!map.has(key)) map.set(key, { key, name: c.name, type: c.type, band: c.band, vendors: new Set() });
+    if (c.provider) map.get(key).vendors.add(c.provider);
+  }
+  return [...map.values()].map((e) => ({ ...e, vendors: [...e.vendors] }))
+    .sort((a, b) => CATS.indexOf(a.type) - CATS.indexOf(b.type) || a.name.localeCompare(b.name));
+}
+const CATALOG = buildCatalog();
+
 /* ---------------- data sources ---------------- */
 // Historical seasons are always rebuilt from static code (read-only, never change).
 // Only the editable current season(s) are persisted — to Supabase when signed in,
@@ -131,12 +145,51 @@ function Modal({ title, onClose, children, wide }) {
 
 /* ---------------- class add/edit form ---------------- */
 
+function CatalogPicker({ onPick }) {
+  const [q, setQ] = useState("");
+  const ql = q.trim().toLowerCase();
+  const rows = CATALOG.filter((e) => !ql
+    || e.name.toLowerCase().includes(ql)
+    || e.vendors.join(" ").toLowerCase().includes(ql)
+    || CAT_LABEL[e.type].toLowerCase().includes(ql));
+  return (
+    <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Reuse from past seasons</span>
+        <span className="text-xs text-slate-400">{rows.length} classes</span>
+      </div>
+      <input className={inputCls + " bg-white"} placeholder="Search past classes or vendors…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">
+        {rows.map((e) => (
+          <button key={e.key} onClick={() => onPick(e)} className="flex w-full items-center gap-2 rounded-lg border border-slate-100 bg-white px-2.5 py-1.5 text-left hover:border-blue-300 hover:bg-blue-50">
+            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${cs(e.type).dot}`} title={CAT_LABEL[e.type]} />
+            <span className="text-sm font-medium text-slate-800">{e.name}</span>
+            <span className="text-xs text-slate-400">{e.band || "—"}</span>
+            <span className="ml-auto truncate pl-2 text-xs text-slate-400">{e.vendors.length ? e.vendors.join(", ") : "no vendor"}</span>
+          </button>
+        ))}
+        {rows.length === 0 && <p className="px-1 py-2 text-sm text-slate-400">No matches.</p>}
+      </div>
+    </div>
+  );
+}
+
 function ClassForm({ initial, onSave, onClose }) {
   const [f, setF] = useState(initial);
+  const [note, setNote] = useState("");
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const valid = f.name.trim() && (!f.end || !f.start || f.end > f.start);
+  const pick = (e) => {
+    setF((p) => ({ ...p, name: e.name, type: e.type, band: e.band || "All",
+      vendors: e.vendors.map((n) => ({ id: genId(), name: n, status: "to_contact", preferredDays: [], contact: "", notes: "" })) }));
+    setNote(e.vendors.length
+      ? `Loaded “${e.name}” — ${e.vendors.length} past vendor${e.vendors.length > 1 ? "s" : ""} added as candidate${e.vendors.length > 1 ? "s" : ""} to contact. Set the day, time, and room below.`
+      : `Loaded “${e.name}”. Set the day, time, and room below.`);
+  };
   return (
     <Modal title={f.id ? "Edit class" : "Add class"} onClose={onClose} wide>
+      {!f.id && <CatalogPicker onPick={pick} />}
+      {note && <div className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{note}</div>}
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2"><Field label="Class name"><input className={inputCls} value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Watercolor Painting" /></Field></div>
         <Field label="Activity type"><select className={inputCls} value={f.type} onChange={(e) => set("type", e.target.value)}>{CATS.map((t) => <option key={t} value={t}>{CAT_LABEL[t]}</option>)}</select></Field>
@@ -163,7 +216,7 @@ function EditableCard({ cls, onEdit, onDelete, onToggleConfirm, onDrag }) {
     <div draggable onDragStart={() => onDrag(cls.id)} className="group cursor-grab rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm active:cursor-grabbing">
       <div className="flex items-start justify-between gap-1">
         <span className="text-sm font-semibold leading-tight text-slate-800">{cls.name}</span>
-        <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100">
+        <div className="flex shrink-0 items-center gap-0.5">
           <button onClick={() => onToggleConfirm(cls.id)} title={cls.status === "confirmed" ? "Un-confirm" : "Confirm for season"} className="rounded p-1 text-slate-400 hover:bg-emerald-50 hover:text-emerald-600"><Check size={13} /></button>
           <button onClick={() => onEdit(cls)} className="rounded p-1 text-slate-400 hover:bg-slate-100"><Pencil size={13} /></button>
           <button onClick={() => onDelete(cls.id)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"><Trash2 size={13} /></button>
@@ -292,33 +345,34 @@ function VendorRow({ v, first, onUpdate, onRemove, onPromote }) {
   );
 }
 
+// Module-level (not defined inside VendorsView's render) so vendor rows keep their
+// identity across re-renders — this is what fixes the per-keystroke typing lag.
+function VendorClassBlock({ c, onClassVendors }) {
+  const upd = (vid, next) => onClassVendors(c.id, c.vendors.map((v) => (v.id === vid ? next : v)));
+  const rm = (vid) => onClassVendors(c.id, c.vendors.filter((v) => v.id !== vid));
+  const add = () => onClassVendors(c.id, [...(c.vendors || []), { id: genId(), name: "New vendor", status: "to_contact", preferredDays: [], contact: "", notes: "" }]);
+  const promote = (vid) => { const v = c.vendors.find((x) => x.id === vid); onClassVendors(c.id, [v, ...c.vendors.filter((x) => x.id !== vid)]); };
+  const fc = firstChoice(c);
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex items-center gap-2">
+        <span className={`h-3 w-3 rounded-full ${cs(c.type).dot}`} />
+        <span className="font-semibold text-slate-800">{c.name}</span>
+        <span className="text-xs text-slate-400">{CAT_LABEL[c.type]} · {c.band} · {c.day}</span>
+        <StatusBadge status={c.status} />
+        {fc && <span className="ml-auto text-xs text-slate-500">1st choice: <span className="font-medium text-slate-700">{fc.name}</span></span>}
+      </div>
+      <div className="mt-3 space-y-2">
+        {(c.vendors || []).map((v, i) => <VendorRow key={v.id} v={v} first={i === 0} onUpdate={(n) => upd(v.id, n)} onRemove={() => rm(v.id)} onPromote={() => promote(v.id)} />)}
+      </div>
+      <button onClick={add} className="mt-2 flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700"><Plus size={13} /> Add candidate vendor</button>
+    </div>
+  );
+}
+
 function VendorsView({ classes, onClassVendors, onEdit }) {
   const needsSourcing = classes.filter((c) => (c.vendors || []).length === 0);
   const withVendors = classes.filter((c) => (c.vendors || []).length > 0);
-  const upd = (cls, vid, next) => onClassVendors(cls.id, cls.vendors.map((v) => (v.id === vid ? next : v)));
-  const rm = (cls, vid) => onClassVendors(cls.id, cls.vendors.filter((v) => v.id !== vid));
-  const add = (cls) => onClassVendors(cls.id, [...(cls.vendors || []), { id: genId(), name: "New vendor", status: "to_contact", preferredDays: [], contact: "", notes: "" }]);
-  const promote = (cls, vid) => { const v = cls.vendors.find((x) => x.id === vid); onClassVendors(cls.id, [v, ...cls.vendors.filter((x) => x.id !== vid)]); };
-
-  const Block = ({ c }) => {
-    const fc = firstChoice(c);
-    return (
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
-        <div className="flex items-center gap-2">
-          <span className={`h-3 w-3 rounded-full ${cs(c.type).dot}`} />
-          <span className="font-semibold text-slate-800">{c.name}</span>
-          <span className="text-xs text-slate-400">{CAT_LABEL[c.type]} · {c.band} · {c.day}</span>
-          <StatusBadge status={c.status} />
-          {fc && <span className="ml-auto text-xs text-slate-500">1st choice: <span className="font-medium text-slate-700">{fc.name}</span></span>}
-        </div>
-        <div className="mt-3 space-y-2">
-          {(c.vendors || []).map((v, i) => <VendorRow key={v.id} v={v} first={i === 0} onUpdate={(n) => upd(c, v.id, n)} onRemove={() => rm(c, v.id)} onPromote={() => promote(c, v.id)} />)}
-        </div>
-        <button onClick={() => add(c)} className="mt-2 flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700"><Plus size={13} /> Add candidate vendor</button>
-      </div>
-    );
-  };
-
   return (
     <div className="space-y-4">
       {needsSourcing.length > 0 && (
@@ -329,8 +383,8 @@ function VendorsView({ classes, onClassVendors, onEdit }) {
           </div>
         </div>
       )}
-      {withVendors.map((c) => <Block key={c.id} c={c} />)}
-      {needsSourcing.map((c) => <Block key={c.id} c={c} />)}
+      {withVendors.map((c) => <VendorClassBlock key={c.id} c={c} onClassVendors={onClassVendors} />)}
+      {needsSourcing.map((c) => <VendorClassBlock key={c.id} c={c} onClassVendors={onClassVendors} />)}
       {classes.length === 0 && <p className="py-12 text-center text-slate-400">Add classes on the Plan tab, then line up vendors here.</p>}
     </div>
   );
