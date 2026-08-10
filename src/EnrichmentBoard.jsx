@@ -109,9 +109,28 @@ function historicalSeasons() {
 const newEditableSeason = () => ({ id: genId(), name: "Fall 2026", editable: true, classes: [] });
 const editableOf = (d) => d.seasons.filter((s) => s.editable);
 
+// The year-round music classes are seeded into a season once (as editable, confirmed
+// classes) so days/times can be adjusted for the new year. A musicSeeded flag prevents
+// re-adding them — and respects any the planner later removes.
+function seedMusic(season) {
+  if (season.musicSeeded) return season;
+  const raw = HISTORICAL_RAW.find((s) => s.yearLong);
+  const musicClasses = (raw ? raw.classes : []).map((c) => {
+    const [gf, gt] = parseBand(c.band);
+    const vName = c.provider || c.instructor || "";
+    return {
+      id: genId(), name: c.name, type: c.type, gradeFrom: gf, gradeTo: gt,
+      day: c.day, start: c.start, end: c.end, room: c.room, status: "confirmed",
+      vendors: vName ? [{ id: genId(), name: vName, status: "agreed", preferredDays: c.day ? [c.day] : [], contact: "", notes: "" }] : [],
+    };
+  });
+  return { ...season, musicSeeded: true, classes: [...musicClasses, ...(season.classes || [])] };
+}
+
 function combine(editableSeasons, activeSeasonId) {
-  const seasons = [...historicalSeasons(), ...editableSeasons];
-  if (!seasons.find((s) => s.id === activeSeasonId)) activeSeasonId = editableSeasons[0]?.id || seasons[0].id;
+  const seeded = editableSeasons.map(seedMusic);
+  const seasons = [...historicalSeasons(), ...seeded];
+  if (!seasons.find((s) => s.id === activeSeasonId)) activeSeasonId = seeded[0]?.id || seasons[0].id;
   return { seasons, activeSeasonId };
 }
 function loadLocal() {
@@ -697,7 +716,6 @@ export default function EnrichmentBoard() {
   const classes = season.classes;
   const isCurrent = season.editable;
   const canEdit = isCurrent && (!supabaseEnabled || !!session);
-  const musicRef = (data.seasons.find((s) => s.yearLong)?.classes) || [];
   const setClasses = (updater) => setData((d) => ({ ...d, seasons: d.seasons.map((s) => (s.id === season.id ? { ...s, classes: updater(s.classes) } : s)) }));
 
   const upsert = (c) => { setClasses((list) => (list.some((x) => x.id === c.id) ? list.map((x) => (x.id === c.id ? c : x)) : [...list, { ...c, id: genId() }])); setForm(null); };
@@ -774,7 +792,7 @@ export default function EnrichmentBoard() {
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
                   {classes.length === 0 && <p className="mb-2 text-center text-sm text-slate-400">Empty season — add classes into the day/activity cells below to start planning.</p>}
-                  <PlanBoard classes={classes} reference={musicRef} setDragId={setDragId} onDropCell={dropCell} onAdd={addToCell} onEdit={setForm} onDelete={remove} onToggleConfirm={toggleConfirm} />
+                  <PlanBoard classes={classes} setDragId={setDragId} onDropCell={dropCell} onAdd={addToCell} onEdit={setForm} onDelete={remove} onToggleConfirm={toggleConfirm} />
                 </div>
               </div>
             )}
@@ -787,7 +805,7 @@ export default function EnrichmentBoard() {
             {signInBar}
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
               {classes.length === 0 && <p className="mb-2 text-center text-sm text-slate-400">This season doesn't have any classes yet.</p>}
-              <PlanBoard classes={classes} readOnly reference={musicRef} />
+              <PlanBoard classes={classes} readOnly />
             </div>
           </div>
         )}
