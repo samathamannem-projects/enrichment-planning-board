@@ -1,26 +1,31 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import {
-  LayoutGrid, Store, CheckCircle2, Share2, Plus, Pencil, Trash2, X,
-  Check, Clock, MapPin, AlertTriangle, ArrowUp, Printer, Copy, Star,
-  ChevronRight, History, User, Lock, LogOut, Cloud, Music, BarChart3,
+  LayoutGrid, Store, CheckCircle2, Share2, Plus, Pencil, Trash2, X, Check, Clock,
+  MapPin, AlertTriangle, ArrowUp, Printer, Copy, Star, ChevronRight, History, User,
+  Lock, LogOut, Cloud, Music, DoorOpen, GraduationCap, Scale,
 } from "lucide-react";
 import { HISTORICAL_RAW } from "./historicalSeasons.js";
 import { supabase, supabaseEnabled } from "./supabaseClient.js";
 
 /* ---------------- constants ---------------- */
 
-const LKEY = "enrichment-board-v2";
+const LKEY = "enrichment-board-v3";
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
 const CATS = ["STEM", "Art", "Movement", "Academic"];
 const CAT_LABEL = { STEM: "STEM / Chess", Art: "Art", Movement: "Movement", Academic: "Academic" };
 const BALANCE = ["Art", "STEM", "Movement"];
 const GRADES = ["K", "1", "2", "3", "4", "5"];
 
+const CARD = "rounded-2xl border border-slate-200 bg-white shadow-sm";
+const INPUT = "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100";
+const BTN = "inline-flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-40";
+const BTN_GHOST = "inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50";
+
 const CAT_STYLE = {
-  STEM:     { bar: "bg-blue-500",    dot: "bg-blue-500",    soft: "bg-blue-50 text-blue-700 border-blue-200" },
-  Art:      { bar: "bg-rose-500",    dot: "bg-rose-500",    soft: "bg-rose-50 text-rose-700 border-rose-200" },
-  Movement: { bar: "bg-emerald-500", dot: "bg-emerald-500", soft: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  Academic: { bar: "bg-violet-500",  dot: "bg-violet-500",  soft: "bg-violet-50 text-violet-700 border-violet-200" },
+  STEM:     { bar: "bg-blue-500",    dot: "bg-blue-500" },
+  Art:      { bar: "bg-rose-500",    dot: "bg-rose-500" },
+  Movement: { bar: "bg-emerald-500", dot: "bg-emerald-500" },
+  Academic: { bar: "bg-violet-500",  dot: "bg-violet-500" },
 };
 const cs = (t) => CAT_STYLE[t] ?? CAT_STYLE.Academic;
 
@@ -48,24 +53,6 @@ const firstChoice = (c) => {
   const v = c.vendors || [];
   return v.filter((x) => x.status !== "declined")[0] || v[0] || null;
 };
-
-/* rooms + conflicts */
-const toMin = (t) => { if (!t) return null; const [h, m] = t.split(":").map(Number); return h * 60 + m; };
-const sameRoom = (x, y) => !!x && !!y && x.trim().toLowerCase() === y.trim().toLowerCase();
-function timesOverlap(a, b) {
-  const as = toMin(a.start), ae = toMin(a.end), bs = toMin(b.start), be = toMin(b.end);
-  if (as == null || ae == null || bs == null || be == null) return true; // unknown time -> treat as overlap
-  return as < be && bs < ae;
-}
-function roomConflicts(classes) {
-  const list = []; const withRoom = classes.filter((c) => c.room && c.day);
-  for (let i = 0; i < withRoom.length; i++) for (let j = i + 1; j < withRoom.length; j++) {
-    const a = withRoom[i], b = withRoom[j];
-    if (a.day === b.day && sameRoom(a.room, b.room) && timesOverlap(a, b)) list.push([a, b]);
-  }
-  return list;
-}
-const KNOWN_ROOMS = [...new Set(HISTORICAL_RAW.flatMap((s) => s.classes.map((c) => c.room)).map((r) => (r || "").trim()).filter(Boolean))].sort();
 
 /* grades */
 function parseBand(b) {
@@ -99,7 +86,7 @@ function suggestVendor(name) {
   if (n.length < 3) return null;
   let best = null, score = 0;
   for (const k of KNOWN_VENDORS) {
-    if (k === raw) return null; // already exact
+    if (k === raw) return null;
     const kn = normV(k);
     let sc;
     if (kn === n) sc = 1;
@@ -109,6 +96,34 @@ function suggestVendor(name) {
   }
   return score >= 0.72 ? best : null;
 }
+
+/* rooms + conflicts + preference tiers */
+const toMin = (t) => { if (!t) return null; const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+const sameRoom = (x, y) => !!x && !!y && x.trim().toLowerCase() === y.trim().toLowerCase();
+function timesOverlap(a, b) {
+  const as = toMin(a.start), ae = toMin(a.end), bs = toMin(b.start), be = toMin(b.end);
+  if (as == null || ae == null || bs == null || be == null) return true;
+  return as < be && bs < ae;
+}
+function roomConflicts(classes) {
+  const list = []; const withRoom = classes.filter((c) => c.room && c.day);
+  for (let i = 0; i < withRoom.length; i++) for (let j = i + 1; j < withRoom.length; j++) {
+    const a = withRoom[i], b = withRoom[j];
+    if (a.day === b.day && sameRoom(a.room, b.room) && timesOverlap(a, b)) list.push([a, b]);
+  }
+  return list;
+}
+const KNOWN_ROOMS = [...new Set(HISTORICAL_RAW.flatMap((s) => s.classes.map((c) => c.room)).map((r) => (r || "").trim()).filter(Boolean))].sort();
+const PREFERRED_ROOMS = ["118", "Art Room", "Gym", "Library", "Portable Class", "Field"];
+const TIER_LABELS = ["Preferred", "Second choice", "Last resort", "Other"];
+function roomTier(name) {
+  const n = (name || "").toLowerCase();
+  if (n.includes("118") || n.includes("art room") || n.includes("gym")) return 0;
+  if (n.includes("library") || n.includes("portable") || n.includes("field")) return 1;
+  if (n.includes("pod")) return 2;
+  return 3;
+}
+const byTier = (a, b) => roomTier(a) - roomTier(b) || a.localeCompare(b);
 
 /* ---------------- data sources ---------------- */
 
@@ -124,14 +139,14 @@ function historicalSeasons() {
     }),
   }));
 }
-const newEditableSeason = () => ({ id: genId(), name: "Fall 2026", editable: true, classes: [] });
+const newEnrichmentSeason = () => ({ id: genId(), name: "Fall 2026", editable: true, kind: "enrichment", classes: [] });
+const newMusicSeason = () => ({ id: genId(), name: "Music 2026–27", editable: true, kind: "music", classes: [] });
+const newEditableSeasons = () => [newEnrichmentSeason(), newMusicSeason()];
 const editableOf = (d) => d.seasons.filter((s) => s.editable);
 
-// The year-round music classes are seeded into a season once (as editable, confirmed
-// classes) so days/times can be adjusted for the new year. A musicSeeded flag prevents
-// re-adding them — and respects any the planner later removes.
+// Music classes seed once into the music-planning season (editable, so days/times can change).
 function seedMusic(season) {
-  if (season.musicSeeded) return season;
+  if (season.kind !== "music" || season.musicSeeded) return season;
   const raw = HISTORICAL_RAW.find((s) => s.yearLong);
   const musicClasses = (raw ? raw.classes : []).map((c) => {
     const [gf, gt] = parseBand(c.band);
@@ -144,15 +159,18 @@ function seedMusic(season) {
   });
   return { ...season, musicSeeded: true, classes: [...musicClasses, ...(season.classes || [])] };
 }
-
+const uniq = (a) => [...new Set(a)];
 function prepareSeason(season) {
   let s = seedMusic(season);
-  if (!s.rooms) s = { ...s, rooms: [...KNOWN_ROOMS] };
+  if (!s.rooms) s = { ...s, rooms: uniq([...PREFERRED_ROOMS, ...KNOWN_ROOMS]) };
+  if (!s.roomsMigrated) s = { ...s, roomsMigrated: true, rooms: uniq([...(s.rooms || []), ...PREFERRED_ROOMS]) };
   return s;
 }
 
 function combine(editableSeasons, activeSeasonId) {
-  const seeded = editableSeasons.map(prepareSeason);
+  let seeded = editableSeasons.map(prepareSeason);
+  if (!seeded.some((s) => s.kind === "music")) seeded = [...seeded, prepareSeason(newMusicSeason())];
+  if (!seeded.some((s) => s.kind === "enrichment" || !s.kind)) seeded = [prepareSeason(newEnrichmentSeason()), ...seeded];
   const seasons = [...historicalSeasons(), ...seeded];
   if (!seasons.find((s) => s.id === activeSeasonId)) activeSeasonId = seeded[0]?.id || seasons[0].id;
   return { seasons, activeSeasonId };
@@ -166,7 +184,7 @@ function loadLocal() {
       if (editable && editable.length) return combine(editable, p.activeSeasonId);
     }
   } catch (_) {}
-  return combine([newEditableSeason()], null);
+  return combine(newEditableSeasons(), null);
 }
 function persistLocal(d) {
   try { localStorage.setItem(LKEY, JSON.stringify({ editableSeasons: editableOf(d), activeSeasonId: d.activeSeasonId })); } catch (_) {}
@@ -176,9 +194,9 @@ async function cloudLoad(canWrite) {
   if (row && row.data && Array.isArray(row.data.editableSeasons) && row.data.editableSeasons.length) {
     return combine(row.data.editableSeasons, row.data.activeSeasonId);
   }
-  const ed = newEditableSeason();
-  if (canWrite) await supabase.from("board_state").upsert({ id: "main", data: { editableSeasons: [ed], activeSeasonId: ed.id } });
-  return combine([ed], ed.id);
+  const eds = newEditableSeasons();
+  if (canWrite) await supabase.from("board_state").upsert({ id: "main", data: { editableSeasons: eds, activeSeasonId: eds[0].id } });
+  return combine(eds, eds[0].id);
 }
 async function cloudSave(d) {
   await supabase.from("board_state").upsert({ id: "main", data: { editableSeasons: editableOf(d), activeSeasonId: d.activeSeasonId }, updated_at: new Date().toISOString() });
@@ -186,20 +204,19 @@ async function cloudSave(d) {
 
 /* ---------------- atoms ---------------- */
 
-const inputCls = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100";
 const Field = ({ label, children }) => (
   <label className="block"><span className="mb-1 block text-xs font-medium text-slate-600">{label}</span>{children}</label>
 );
 const StatusBadge = ({ status }) => {
   const s = STATUS[status] ?? STATUS.idea;
-  return <span className={`rounded border px-1.5 py-0.5 text-xs font-medium ${s.cls}`}>{s.label}</span>;
+  return <span className={`rounded-md border px-1.5 py-0.5 text-xs font-medium ${s.cls}`}>{s.label}</span>;
 };
 function Modal({ title, onClose, children, wide }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4" style={{ backgroundColor: "rgba(15,23,42,0.45)" }} onClick={onClose}>
-      <div className={`mt-8 w-full ${wide ? "max-w-2xl" : "max-w-lg"} rounded-2xl bg-white shadow-xl`} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4" style={{ backgroundColor: "rgba(15,23,42,0.5)" }} onClick={onClose}>
+      <div className={`mt-8 w-full ${wide ? "max-w-2xl" : "max-w-lg"} rounded-2xl bg-white shadow-2xl`} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h3 className="text-base font-semibold text-slate-800">{title}</h3>
+          <h3 className="text-base font-semibold text-slate-900">{title}</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"><X size={18} /></button>
         </div>
         <div className="px-5 py-4">{children}</div>
@@ -207,8 +224,16 @@ function Modal({ title, onClose, children, wide }) {
     </div>
   );
 }
+function SectionHead({ icon: Icon, title, hint }) {
+  return (
+    <div className="mb-3">
+      <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Icon size={15} className="text-indigo-500" /> {title}</h3>
+      {hint && <p className="mt-0.5 text-xs text-slate-400">{hint}</p>}
+    </div>
+  );
+}
 
-/* ---------------- catalog picker + class form ---------------- */
+/* ---------------- catalog + class form ---------------- */
 
 function buildCatalog() {
   const map = new Map();
@@ -235,10 +260,10 @@ function CatalogPicker({ onPick }) {
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Reuse from past seasons</span>
         <span className="text-xs text-slate-400">{rows.length} classes</span>
       </div>
-      <input className={inputCls + " bg-white"} placeholder="Search past classes or vendors…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input className={INPUT} placeholder="Search past classes or vendors…" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">
         {rows.map((e) => (
-          <button key={e.key} onClick={() => onPick(e)} className="flex w-full items-center gap-2 rounded-lg border border-slate-100 bg-white px-2.5 py-1.5 text-left hover:border-blue-300 hover:bg-blue-50">
+          <button key={e.key} onClick={() => onPick(e)} className="flex w-full items-center gap-2 rounded-lg border border-slate-100 bg-white px-2.5 py-1.5 text-left hover:border-indigo-300 hover:bg-indigo-50">
             <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${cs(e.type).dot}`} title={CAT_LABEL[e.type]} />
             <span className="text-sm font-medium text-slate-800">{e.name}</span>
             <span className="text-xs text-slate-400">{gradeText(e)}</span>
@@ -251,6 +276,19 @@ function CatalogPicker({ onPick }) {
   );
 }
 
+function RoomSelect({ value, rooms, onChange }) {
+  return (
+    <select className={INPUT} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">— none —</option>
+      {value && !(rooms || []).includes(value) && <option value={value}>{value}</option>}
+      {TIER_LABELS.map((label, ti) => {
+        const group = (rooms || []).filter((r) => roomTier(r) === ti).sort((a, b) => a.localeCompare(b));
+        return group.length ? <optgroup key={label} label={label}>{group.map((r) => <option key={r} value={r}>{r}</option>)}</optgroup> : null;
+      })}
+    </select>
+  );
+}
+
 function ClassForm({ initial, onSave, onClose, rooms }) {
   const [f, setF] = useState(initial);
   const [note, setNote] = useState("");
@@ -260,7 +298,7 @@ function ClassForm({ initial, onSave, onClose, rooms }) {
     setF((p) => ({ ...p, name: e.name, type: e.type, gradeFrom: e.gradeFrom ?? 0, gradeTo: e.gradeTo ?? 5,
       vendors: e.vendors.map((n) => ({ id: genId(), name: n, status: "to_contact", preferredDays: [], contact: "", notes: "" })) }));
     setNote(e.vendors.length
-      ? `Loaded “${e.name}” — ${e.vendors.length} past vendor${e.vendors.length > 1 ? "s" : ""} added as candidate${e.vendors.length > 1 ? "s" : ""} to contact. Set the day, time, and room below.`
+      ? `Loaded “${e.name}” — ${e.vendors.length} past vendor${e.vendors.length > 1 ? "s" : ""} added to contact. Set the day, time, and room below.`
       : `Loaded “${e.name}”. Set the day, time, and room below.`);
   };
   const vSet = (vs) => setF((p) => ({ ...p, vendors: vs }));
@@ -274,25 +312,21 @@ function ClassForm({ initial, onSave, onClose, rooms }) {
       {!f.id && <CatalogPicker onPick={pick} />}
       {note && <div className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{note}</div>}
       <div className="grid grid-cols-2 gap-3">
-        <div className="col-span-2"><Field label="Class name"><input className={inputCls} value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Watercolor Painting" /></Field></div>
-        <Field label="Activity type"><select className={inputCls} value={f.type} onChange={(e) => set("type", e.target.value)}>{CATS.map((t) => <option key={t} value={t}>{CAT_LABEL[t]}</option>)}</select></Field>
-        <Field label="Day"><select className={inputCls} value={f.day} onChange={(e) => set("day", e.target.value)}>{DAYS.map((d) => <option key={d}>{d}</option>)}</select></Field>
-        <Field label="Grade from"><select className={inputCls} value={f.gradeFrom} onChange={(e) => set("gradeFrom", Number(e.target.value))}>{GRADES.map((g, i) => <option key={g} value={i}>{g}</option>)}</select></Field>
-        <Field label="Grade to"><select className={inputCls} value={f.gradeTo} onChange={(e) => set("gradeTo", Number(e.target.value))}>{GRADES.map((g, i) => <option key={g} value={i}>{g}</option>)}</select></Field>
-        <Field label="Start time"><input type="time" className={inputCls} value={f.start} onChange={(e) => set("start", e.target.value)} /></Field>
-        <Field label="End time"><input type="time" className={inputCls} value={f.end} onChange={(e) => set("end", e.target.value)} /></Field>
-        <Field label="Room"><select className={inputCls} value={f.room} onChange={(e) => set("room", e.target.value)}>
-          <option value="">— none —</option>
-          {f.room && !(rooms || []).includes(f.room) && <option value={f.room}>{f.room}</option>}
-          {(rooms || []).map((r) => <option key={r} value={r}>{r}</option>)}
-        </select></Field>
-        <Field label="Status"><select className={inputCls} value={f.status} onChange={(e) => set("status", e.target.value)}>{Object.keys(STATUS).map((s) => <option key={s} value={s}>{STATUS[s].label}</option>)}</select></Field>
+        <div className="col-span-2"><Field label="Class name"><input className={INPUT} value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Watercolor Painting" /></Field></div>
+        <Field label="Activity type"><select className={INPUT} value={f.type} onChange={(e) => set("type", e.target.value)}>{CATS.map((t) => <option key={t} value={t}>{CAT_LABEL[t]}</option>)}</select></Field>
+        <Field label="Day"><select className={INPUT} value={f.day} onChange={(e) => set("day", e.target.value)}>{DAYS.map((d) => <option key={d}>{d}</option>)}</select></Field>
+        <Field label="Grade from"><select className={INPUT} value={f.gradeFrom} onChange={(e) => set("gradeFrom", Number(e.target.value))}>{GRADES.map((g, i) => <option key={g} value={i}>{g}</option>)}</select></Field>
+        <Field label="Grade to"><select className={INPUT} value={f.gradeTo} onChange={(e) => set("gradeTo", Number(e.target.value))}>{GRADES.map((g, i) => <option key={g} value={i}>{g}</option>)}</select></Field>
+        <Field label="Start time"><input type="time" className={INPUT} value={f.start} onChange={(e) => set("start", e.target.value)} /></Field>
+        <Field label="End time"><input type="time" className={INPUT} value={f.end} onChange={(e) => set("end", e.target.value)} /></Field>
+        <Field label="Room"><RoomSelect value={f.room} rooms={rooms} onChange={(v) => set("room", v)} /></Field>
+        <Field label="Status"><select className={INPUT} value={f.status} onChange={(e) => set("status", e.target.value)}>{Object.keys(STATUS).map((s) => <option key={s} value={s}>{STATUS[s].label}</option>)}</select></Field>
       </div>
 
       <div className="mt-4">
         <div className="mb-1.5 flex items-center justify-between">
           <span className="text-xs font-medium text-slate-600">Vendors</span>
-          <button onClick={vAdd} className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700"><Plus size={12} /> Add vendor</button>
+          <button onClick={vAdd} className="flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700"><Plus size={12} /> Add vendor</button>
         </div>
         {(f.vendors || []).length === 0 && <p className="text-xs text-slate-400">No vendor yet — add one here, or manage candidates later in the Vendors tab.</p>}
         <div className="space-y-1.5">
@@ -304,11 +338,11 @@ function ClassForm({ initial, onSave, onClose, rooms }) {
                   {i === 0
                     ? <Star size={13} className="shrink-0 fill-amber-400 text-amber-400" title="First choice" />
                     : <button onClick={() => vPromote(v.id)} title="Make first choice" className="shrink-0 rounded p-0.5 text-slate-300 hover:text-amber-500"><ArrowUp size={13} /></button>}
-                  <input className={inputCls + " flex-1"} placeholder="Vendor name" value={v.name} onChange={(e) => vUpd(v.id, { ...v, name: e.target.value })} />
-                  <select value={v.status} onChange={(e) => vUpd(v.id, { ...v, status: e.target.value })} className={`shrink-0 rounded-lg border border-slate-200 px-2 py-2 text-xs font-medium ${V_STATUS[v.status].cls}`}>{V_ORDER.map((s) => <option key={s} value={s}>{V_STATUS[s].label}</option>)}</select>
+                  <input className={INPUT + " flex-1"} placeholder="Vendor name" value={v.name} onChange={(e) => vUpd(v.id, { ...v, name: e.target.value })} />
+                  <select value={v.status} onChange={(e) => vUpd(v.id, { ...v, status: e.target.value })} className={`shrink-0 rounded-xl border border-slate-200 px-2 py-2 text-xs font-medium ${V_STATUS[v.status].cls}`}>{V_ORDER.map((s) => <option key={s} value={s}>{V_STATUS[s].label}</option>)}</select>
                   <button onClick={() => vRm(v.id)} className="shrink-0 rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500"><Trash2 size={14} /></button>
                 </div>
-                {sugg && <div className="mt-0.5 pl-6 text-xs text-slate-500">Did you mean <button onClick={() => vUpd(v.id, { ...v, name: sugg })} className="font-medium text-blue-600 underline">{sugg}</button>?</div>}
+                {sugg && <div className="mt-0.5 pl-6 text-xs text-slate-500">Did you mean <button onClick={() => vUpd(v.id, { ...v, name: sugg })} className="font-medium text-indigo-600 underline">{sugg}</button>?</div>}
               </div>
             );
           })}
@@ -316,8 +350,8 @@ function ClassForm({ initial, onSave, onClose, rooms }) {
       </div>
 
       <div className="mt-5 flex justify-end gap-2">
-        <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
-        <button disabled={!valid} onClick={() => onSave({ ...f, name: f.name.trim() })} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">{f.id ? "Save changes" : "Add class"}</button>
+        <button onClick={onClose} className="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
+        <button disabled={!valid} onClick={() => onSave({ ...f, name: f.name.trim() })} className={BTN + " px-4"}>{f.id ? "Save changes" : "Add class"}</button>
       </div>
     </Modal>
   );
@@ -325,10 +359,10 @@ function ClassForm({ initial, onSave, onClose, rooms }) {
 
 /* ---------------- cards ---------------- */
 
-function EditableCard({ cls, onEdit, onDelete, onToggleConfirm, onDrag }) {
+function EditableCard({ cls, onEdit, onDelete, onToggleConfirm, onDrag, conflict }) {
   const fc = firstChoice(cls);
   return (
-    <div draggable onDragStart={() => onDrag(cls.id)} className="cursor-grab rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm active:cursor-grabbing">
+    <div draggable onDragStart={() => onDrag(cls.id)} className={`group cursor-grab rounded-xl border bg-white p-2.5 shadow-sm transition active:cursor-grabbing ${conflict ? "border-red-300 ring-1 ring-red-200" : "border-slate-200 hover:border-indigo-200 hover:shadow"}`}>
       <div className="flex items-start justify-between gap-1">
         <span className="text-sm font-semibold leading-tight text-slate-800">{cls.name}</span>
         <div className="flex shrink-0 items-center gap-0.5">
@@ -338,12 +372,12 @@ function EditableCard({ cls, onEdit, onDelete, onToggleConfirm, onDrag }) {
         </div>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-1">
-        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600">{gradeText(cls)}</span>
+        <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600">{gradeText(cls)}</span>
         <StatusBadge status={cls.status} />
       </div>
       <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-400">
         <span className="flex items-center gap-1"><Clock size={11} />{fmtTime(cls.start)}</span>
-        {cls.room && <span className="flex items-center gap-1"><MapPin size={11} />{cls.room}</span>}
+        {cls.room && <span className={`flex items-center gap-1 ${conflict ? "font-medium text-red-500" : ""}`}><MapPin size={11} />{cls.room}</span>}
       </div>
       <div className="mt-1.5 flex items-center gap-1.5 border-t border-slate-50 pt-1.5 text-xs">
         {fc ? (
@@ -358,13 +392,13 @@ function ReadOnlyCard({ cls }) {
   const fc = firstChoice(cls);
   const cancelled = cls.outcome === "Cancelled";
   return (
-    <div className={`rounded-lg border p-2.5 ${cancelled ? "border-slate-200 bg-slate-50" : "border-slate-200 bg-white"}`} style={cancelled ? { opacity: 0.65 } : undefined}>
+    <div className={`rounded-xl border p-2.5 ${cancelled ? "border-slate-200 bg-slate-50" : "border-slate-200 bg-white"}`} style={cancelled ? { opacity: 0.65 } : undefined}>
       <div className="flex items-start justify-between gap-1">
         <span className={`text-sm font-semibold leading-tight text-slate-800 ${cancelled ? "line-through" : ""}`}>{cls.name}</span>
         {cancelled && <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-600">Cancelled</span>}
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-400">
-        <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-600">{gradeText(cls)}</span>
+        <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-medium text-slate-600">{gradeText(cls)}</span>
         <span className="flex items-center gap-1"><Clock size={11} />{fmtTime(cls.start)}</span>
         {cls.room && <span className="flex items-center gap-1"><MapPin size={11} />{cls.room}</span>}
       </div>
@@ -373,59 +407,39 @@ function ReadOnlyCard({ cls }) {
         <span className="truncate text-slate-600">{fc ? fc.name : "—"}</span>
         {!cancelled && cls.capacity > 0 && <span className="ml-auto shrink-0 text-slate-400">{cls.enrolled}/{cls.capacity} enrolled</span>}
       </div>
-      {cls.feedback && <div className="mt-1.5 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800">{cls.feedback}</div>}
+      {cls.feedback && <div className="mt-1.5 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800">{cls.feedback}</div>}
     </div>
   );
 }
 
-function ReferenceCard({ cls }) {
-  return (
-    <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-2">
-      <div className="flex items-center gap-1">
-        <Music size={11} className="shrink-0 text-slate-400" />
-        <span className="text-sm font-medium text-slate-600">{cls.name}</span>
-      </div>
-      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-        <span>{gradeText(cls)}</span>
-        {cls.start && <span className="flex items-center gap-1"><Clock size={10} />{fmtTime(cls.start)}</span>}
-        {cls.room && <span className="flex items-center gap-1"><MapPin size={10} />{cls.room}</span>}
-      </div>
-      <div className="mt-0.5 text-xs font-medium text-slate-400">year-round music</div>
-    </div>
-  );
-}
+/* ---------------- plan board (single grid = aligned columns) ---------------- */
 
-/* ---------------- plan board ---------------- */
-
-function PlanBoard({ classes, readOnly, reference, setDragId, onDropCell, onAdd, onEdit, onDelete, onToggleConfirm }) {
+function PlanBoard({ classes, readOnly, setDragId, onDropCell, onAdd, onEdit, onDelete, onToggleConfirm, conflictIds }) {
   const [over, setOver] = useState(null);
-  const cell = (day, type) => classes.filter((c) => c.day === day && c.type === type);
+  const cids = conflictIds || new Set();
   return (
     <div className="overflow-x-auto">
-      <div style={{ minWidth: 900 }}>
-        <div className="grid" style={{ gridTemplateColumns: "120px repeat(5, 1fr)" }}>
-          <div />
-          {DAYS.map((d) => {
-            const have = new Set([...classes, ...(reference || [])].filter((c) => c.day === d).map((c) => c.type));
-            return (
-              <div key={d} className="px-1 pb-2 text-center">
-                <div className="text-sm font-semibold text-slate-700">{d}</div>
-                <div className="mt-1 flex justify-center gap-1">
-                  {BALANCE.map((t) => <span key={t} title={CAT_LABEL[t]} className={`h-1.5 w-1.5 rounded-full ${have.has(t) ? cs(t).bar : "bg-slate-200"}`} />)}
-                </div>
+      <div className="grid" style={{ gridTemplateColumns: "132px repeat(5, minmax(148px, 1fr))" }}>
+        <div className="sticky left-0 z-10 bg-white" />
+        {DAYS.map((d) => {
+          const have = new Set(classes.filter((c) => c.day === d).map((c) => c.type));
+          return (
+            <div key={d} className="border-b border-slate-100 px-2 pb-2 text-center">
+              <div className="text-sm font-semibold text-slate-700">{d}</div>
+              <div className="mt-1 flex justify-center gap-1">
+                {BALANCE.map((t) => <span key={t} title={CAT_LABEL[t]} className={`h-1.5 w-1.5 rounded-full ${have.has(t) ? cs(t).bar : "bg-slate-200"}`} />)}
               </div>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })}
         {CATS.map((type) => (
-          <div key={type} className="grid border-t border-slate-100" style={{ gridTemplateColumns: "120px repeat(5, 1fr)" }}>
-            <div className="flex items-center gap-2 py-3 pr-2">
-              <span className={`h-3 w-1 rounded-full ${cs(type).bar}`} />
-              <span className="text-sm font-medium text-slate-600">{CAT_LABEL[type]}</span>
+          <Fragment key={type}>
+            <div className="sticky left-0 z-10 flex items-center gap-2 border-t border-slate-100 bg-white py-3 pr-2">
+              <span className={`h-7 w-1.5 rounded-full ${cs(type).bar}`} />
+              <span className="text-sm font-semibold text-slate-700">{CAT_LABEL[type]}</span>
             </div>
             {DAYS.map((day) => {
-              const items = cell(day, type);
-              const refItems = (reference || []).filter((c) => c.day === day && c.type === type);
+              const items = classes.filter((c) => c.day === day && c.type === type);
               const isOver = over === `${day}-${type}`;
               const dnd = readOnly ? {} : {
                 onDragOver: (e) => { e.preventDefault(); setOver(`${day}-${type}`); },
@@ -433,26 +447,161 @@ function PlanBoard({ classes, readOnly, reference, setDragId, onDropCell, onAdd,
                 onDrop: () => { onDropCell(day, type); setOver(null); },
               };
               return (
-                <div key={day} {...dnd} className={`space-y-1.5 border-l border-slate-100 p-1.5 ${isOver ? "bg-blue-50" : ""}`} style={{ minHeight: 84 }}>
-                  {refItems.map((c) => <ReferenceCard key={c.id} cls={c} />)}
+                <div key={day} {...dnd} className={`space-y-1.5 border-l border-t border-slate-100 p-1.5 transition-colors ${isOver ? "bg-indigo-50" : ""}`} style={{ minHeight: 92 }}>
                   {items.map((c) => readOnly
                     ? <ReadOnlyCard key={c.id} cls={c} />
-                    : <EditableCard key={c.id} cls={c} onEdit={onEdit} onDelete={onDelete} onToggleConfirm={onToggleConfirm} onDrag={setDragId} />)}
+                    : <EditableCard key={c.id} cls={c} conflict={cids.has(c.id)} onEdit={onEdit} onDelete={onDelete} onToggleConfirm={onToggleConfirm} onDrag={setDragId} />)}
                   {!readOnly && (
-                    <button onClick={() => onAdd(day, type)} className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-slate-200 py-1.5 text-xs text-slate-400 hover:border-blue-300 hover:text-blue-500"><Plus size={12} /> Add</button>
+                    <button onClick={() => onAdd(day, type)} className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-slate-200 py-1.5 text-xs text-slate-400 hover:border-indigo-300 hover:text-indigo-500"><Plus size={12} /> Add</button>
                   )}
                 </div>
               );
             })}
-          </div>
+          </Fragment>
         ))}
       </div>
-      {!readOnly && <p className="mt-3 text-xs text-slate-400">Drag a card to a different day or activity row to rebalance. Dots under each day show whether Art / STEM / Movement is covered.</p>}
+      {!readOnly && <p className="mt-3 text-xs text-slate-400">Drag a card to another day or activity to rebalance. The dots under each day show whether Art, STEM, and Movement are covered.</p>}
     </div>
   );
 }
 
-/* ---------------- vendors pipeline ---------------- */
+/* ---------------- insights (room availability, coverage, balance) ---------------- */
+
+function RoomRow({ name, onRename, onRemove }) {
+  const [val, setVal] = useState(name);
+  useEffect(() => setVal(name), [name]);
+  const commit = () => { const v = val.trim(); if (v && v !== name) onRename(name, v); else setVal(name); };
+  return (
+    <div className="flex items-center gap-2">
+      <input className={INPUT + " flex-1"} value={val} onChange={(e) => setVal(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
+      <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">{TIER_LABELS[roomTier(name)]}</span>
+      <button onClick={onRemove} className="shrink-0 rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500"><Trash2 size={14} /></button>
+    </div>
+  );
+}
+
+function InsightsPanels({ classes, rooms, onRooms, onRename, canEdit }) {
+  const [newRoom, setNewRoom] = useState("");
+  const used = [...new Set(classes.map((c) => c.room).filter(Boolean))];
+  const allRooms = [...new Set([...(rooms || []), ...used])].sort(byTier);
+  const conflicts = roomConflicts(classes);
+  const conflictIds = new Set();
+  conflicts.forEach(([a, b]) => { conflictIds.add(a.id); conflictIds.add(b.id); });
+
+  const addRoom = () => { const r = newRoom.trim(); if (r && !(rooms || []).some((x) => sameRoom(x, r))) onRooms([...(rooms || []), r]); setNewRoom(""); };
+  const removeRoom = (i) => onRooms(rooms.filter((_, x) => x !== i));
+
+  const dayHead = (extra) => (
+    <div className="grid" style={{ gridTemplateColumns: `150px repeat(5, minmax(0, 1fr))${extra || ""}` }}>
+      <div />{DAYS.map((d) => <div key={d} className="pb-2 text-center text-sm font-semibold text-slate-600">{d}</div>)}
+      {extra && <div className="pb-2 text-center text-xs font-semibold text-slate-400">Week</div>}
+    </div>
+  );
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      {/* room availability — full width */}
+      <div className={CARD + " p-4 lg:col-span-2"}>
+        <SectionHead icon={DoorOpen} title="Room availability" hint="Rooms grouped by your preference tiers. Green means free that day; red means a double-booking." />
+        {conflicts.length > 0 && (
+          <ul className="mb-3 space-y-0.5 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-600">
+            {conflicts.map(([a, b], i) => <li key={i}>“{a.name}” &amp; “{b.name}” — {a.room}, {a.day} ({fmtTime(a.start)}–{fmtTime(a.end)} vs {fmtTime(b.start)}–{fmtTime(b.end)})</li>)}
+          </ul>
+        )}
+        <div className="overflow-x-auto"><div style={{ minWidth: 720 }}>
+          {dayHead()}
+          {allRooms.length === 0 && <p className="py-2 text-sm text-slate-400">No rooms yet.</p>}
+          {allRooms.map((room, idx) => {
+            const tier = roomTier(room);
+            const showLabel = idx === 0 || roomTier(allRooms[idx - 1]) !== tier;
+            return (
+              <Fragment key={room}>
+                {showLabel && <div className="border-t border-slate-100 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{TIER_LABELS[tier]}</div>}
+                <div className="grid border-t border-slate-50" style={{ gridTemplateColumns: "150px repeat(5, minmax(0, 1fr))" }}>
+                  <div className="flex items-center py-2 pr-2 text-sm font-medium text-slate-600">{room}</div>
+                  {DAYS.map((day) => {
+                    const inCell = classes.filter((c) => sameRoom(c.room, room) && c.day === day);
+                    const conflict = inCell.some((c) => conflictIds.has(c.id));
+                    return (
+                      <div key={day} className={`space-y-0.5 border-l border-slate-50 p-1.5 ${conflict ? "bg-red-50" : ""}`}>
+                        {inCell.length === 0
+                          ? <span className="text-xs font-medium text-emerald-500">free</span>
+                          : inCell.map((c) => <div key={c.id} className={`truncate text-xs ${conflict ? "font-medium text-red-600" : "text-slate-600"}`}>{c.name} · {fmtTime(c.start)}</div>)}
+                      </div>
+                    );
+                  })}
+                </div>
+              </Fragment>
+            );
+          })}
+        </div></div>
+      </div>
+
+      {/* grade coverage */}
+      <div className={CARD + " p-4"}>
+        <SectionHead icon={GraduationCap} title="Grade coverage" hint="Green where at least one class that day includes that grade." />
+        <div className="overflow-x-auto"><div style={{ minWidth: 380 }}>
+          {dayHead()}
+          {GRADES.map((g, gi) => (
+            <div key={g} className="grid border-t border-slate-100" style={{ gridTemplateColumns: "150px repeat(5, minmax(0, 1fr))" }}>
+              <div className="flex items-center py-2 pr-2 text-sm font-medium text-slate-600">Grade {g}</div>
+              {DAYS.map((day) => {
+                const ok = classes.some((c) => c.day === day && c.gradeFrom != null && c.gradeTo != null && gi >= c.gradeFrom && gi <= c.gradeTo);
+                return (
+                  <div key={day} className="flex items-center justify-center border-l border-slate-100 py-2">
+                    {ok ? <span className="grid h-5 w-5 place-items-center rounded-full bg-emerald-100 text-emerald-600"><Check size={12} /></span>
+                        : <span className="grid h-5 w-5 place-items-center rounded-full bg-red-50 text-xs text-red-300">·</span>}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div></div>
+      </div>
+
+      {/* category balance */}
+      <div className={CARD + " p-4"}>
+        <SectionHead icon={Scale} title="Category balance" hint="Classes per category each day, with the week's total. Zeros flag thin spots." />
+        <div className="overflow-x-auto"><div style={{ minWidth: 420 }}>
+          {dayHead(" 64px")}
+          {CATS.map((cat) => {
+            const total = classes.filter((c) => c.type === cat).length;
+            return (
+              <div key={cat} className="grid border-t border-slate-100" style={{ gridTemplateColumns: "150px repeat(5, minmax(0, 1fr)) 64px" }}>
+                <div className="flex items-center gap-2 py-2 pr-2"><span className={`h-2.5 w-2.5 rounded-full ${cs(cat).dot}`} /><span className="text-sm font-medium text-slate-600">{CAT_LABEL[cat]}</span></div>
+                {DAYS.map((day) => {
+                  const n = classes.filter((c) => c.type === cat && c.day === day).length;
+                  return <div key={day} className="flex items-center justify-center border-l border-slate-100 py-2 text-sm">{n > 0 ? <span className="font-medium text-slate-700">{n}</span> : <span className="text-slate-300">0</span>}</div>;
+                })}
+                <div className="flex items-center justify-center py-2 text-sm font-semibold text-slate-500">{total}</div>
+              </div>
+            );
+          })}
+        </div></div>
+      </div>
+
+      {/* rooms manager */}
+      {canEdit && (
+        <div className={CARD + " p-4 lg:col-span-2"}>
+          <SectionHead icon={DoorOpen} title="Rooms" hint="Rooms you can assign to a class. Renaming one updates every class using it." />
+          <div className="grid max-w-2xl gap-1.5 sm:grid-cols-2">
+            {(rooms || []).slice().sort(byTier).map((r) => {
+              const i = rooms.indexOf(r);
+              return <RoomRow key={r + i} name={r} onRename={onRename} onRemove={() => removeRoom(i)} />;
+            })}
+            {(rooms || []).length === 0 && <p className="text-sm text-slate-400">No rooms yet.</p>}
+          </div>
+          <div className="mt-3 flex max-w-sm gap-2">
+            <input className={INPUT} placeholder="Add a room…" value={newRoom} onChange={(e) => setNewRoom(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addRoom()} />
+            <button onClick={addRoom} className={BTN}>Add</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- vendors ---------------- */
 
 function VendorRow({ v, first, onUpdate, onRemove, onPromote }) {
   const toggleDay = (d) => {
@@ -461,22 +610,22 @@ function VendorRow({ v, first, onUpdate, onRemove, onPromote }) {
   };
   const sugg = suggestVendor(v.name);
   return (
-    <div className="rounded-lg border border-slate-200 p-3">
+    <div className="rounded-xl border border-slate-200 p-3">
       <div className="flex items-center gap-2">
         {first ? <Star size={14} className="shrink-0 fill-amber-400 text-amber-400" title="First choice" />
           : <button onClick={onPromote} title="Make first choice" className="shrink-0 rounded p-0.5 text-slate-300 hover:text-amber-500"><ArrowUp size={14} /></button>}
-        <input className="flex-1 rounded border border-slate-200 px-2 py-1 text-sm font-medium text-slate-800 focus:border-blue-300 focus:outline-none" value={v.name} onChange={(e) => onUpdate({ ...v, name: e.target.value })} />
-        <select value={v.status} onChange={(e) => onUpdate({ ...v, status: e.target.value })} className={`rounded px-2 py-1 text-xs font-medium ${V_STATUS[v.status].cls}`}>{V_ORDER.map((s) => <option key={s} value={s}>{V_STATUS[s].label}</option>)}</select>
+        <input className="flex-1 rounded-lg border border-slate-200 px-2 py-1 text-sm font-medium text-slate-800 focus:border-indigo-300 focus:outline-none" value={v.name} onChange={(e) => onUpdate({ ...v, name: e.target.value })} />
+        <select value={v.status} onChange={(e) => onUpdate({ ...v, status: e.target.value })} className={`rounded-lg px-2 py-1 text-xs font-medium ${V_STATUS[v.status].cls}`}>{V_ORDER.map((s) => <option key={s} value={s}>{V_STATUS[s].label}</option>)}</select>
         <button onClick={onRemove} className="shrink-0 rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500"><Trash2 size={13} /></button>
       </div>
-      {sugg && <div className="mt-1 pl-6 text-xs text-slate-500">Did you mean <button onClick={() => onUpdate({ ...v, name: sugg })} className="font-medium text-blue-600 underline">{sugg}</button>?</div>}
+      {sugg && <div className="mt-1 pl-6 text-xs text-slate-500">Did you mean <button onClick={() => onUpdate({ ...v, name: sugg })} className="font-medium text-indigo-600 underline">{sugg}</button>?</div>}
       <div className="mt-2 flex flex-wrap items-center gap-1 pl-6">
         <span className="text-xs text-slate-400">Prefers:</span>
-        {DAYS.map((d) => <button key={d} onClick={() => toggleDay(d)} className={`rounded px-1.5 py-0.5 text-xs ${v.preferredDays.includes(d) ? "bg-blue-100 text-blue-700" : "bg-slate-50 text-slate-400 hover:bg-slate-100"}`}>{d}</button>)}
+        {DAYS.map((d) => <button key={d} onClick={() => toggleDay(d)} className={`rounded px-1.5 py-0.5 text-xs ${v.preferredDays.includes(d) ? "bg-indigo-100 text-indigo-700" : "bg-slate-50 text-slate-400 hover:bg-slate-100"}`}>{d}</button>)}
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2 pl-6">
-        <input className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 focus:outline-none" placeholder="Contact (email / phone)" value={v.contact} onChange={(e) => onUpdate({ ...v, contact: e.target.value })} />
-        <input className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-600 focus:outline-none" placeholder="Notes" value={v.notes} onChange={(e) => onUpdate({ ...v, notes: e.target.value })} />
+        <input className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 focus:outline-none" placeholder="Contact (email / phone)" value={v.contact} onChange={(e) => onUpdate({ ...v, contact: e.target.value })} />
+        <input className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 focus:outline-none" placeholder="Notes" value={v.notes} onChange={(e) => onUpdate({ ...v, notes: e.target.value })} />
       </div>
     </div>
   );
@@ -491,7 +640,7 @@ function VendorClassBlock({ c, onClassVendors, show }) {
   const firstId = (c.vendors || [])[0]?.id;
   const shown = (c.vendors || []).filter((v) => show.has(v.status));
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
+    <div className={CARD + " p-4"}>
       <div className="flex items-center gap-2">
         <span className={`h-3 w-3 rounded-full ${cs(c.type).dot}`} />
         <span className="font-semibold text-slate-800">{c.name}</span>
@@ -503,7 +652,7 @@ function VendorClassBlock({ c, onClassVendors, show }) {
         {shown.map((v) => <VendorRow key={v.id} v={v} first={v.id === firstId} onUpdate={(n) => upd(v.id, n)} onRemove={() => rm(v.id)} onPromote={() => promote(v.id)} />)}
         {shown.length === 0 && <p className="text-xs text-slate-400">{(c.vendors || []).length ? "No vendors match the filter." : "No vendors yet."}</p>}
       </div>
-      <button onClick={add} className="mt-2 flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700"><Plus size={13} /> Add candidate vendor</button>
+      <button onClick={add} className="mt-2 flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700"><Plus size={13} /> Add candidate vendor</button>
     </div>
   );
 }
@@ -515,17 +664,17 @@ function VendorsView({ classes, onClassVendors, onEdit }) {
   const withVendors = classes.filter((c) => (c.vendors || []).length > 0);
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3">
+      <div className={CARD + " flex flex-wrap items-center gap-2 p-3"}>
         <span className="text-xs font-medium text-slate-500">Show:</span>
         {V_ORDER.map((s) => (
           <button key={s} onClick={() => toggle(s)} className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${show.has(s) ? V_STATUS[s].cls + " border-transparent" : "border-slate-200 text-slate-400"}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${show.has(s) ? V_STATUS[s].dot : "bg-slate-300"}`} />{V_STATUS[s].label}
           </button>
         ))}
-        <button onClick={() => setShow(new Set(["responded", "agreed"]))} className="ml-auto text-xs font-medium text-blue-600 hover:text-blue-700">Responded &amp; agreed only</button>
+        <button onClick={() => setShow(new Set(["responded", "agreed"]))} className="ml-auto text-xs font-medium text-indigo-600 hover:text-indigo-700">Responded &amp; agreed only</button>
       </div>
       {needsSourcing.length > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
           <p className="flex items-center gap-2 text-sm font-semibold text-amber-800"><AlertTriangle size={15} /> {needsSourcing.length} class{needsSourcing.length > 1 ? "es" : ""} still need a vendor</p>
           <div className="mt-2 flex flex-wrap gap-2">
             {needsSourcing.map((c) => <button key={c.id} onClick={() => onEdit(c)} className="flex items-center gap-1 rounded-lg border border-amber-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:border-amber-300"><span className={`h-2 w-2 rounded-full ${cs(c.type).dot}`} /> {c.name} <ChevronRight size={12} className="text-slate-300" /></button>)}
@@ -637,17 +786,17 @@ function ShareView({ classes, seasonName }) {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-lg border border-slate-200 p-0.5">
-          <button onClick={() => setMode("proposed")} className={`rounded-md px-3 py-1.5 text-sm font-medium ${mode === "proposed" ? "bg-blue-600 text-white" : "text-slate-600"}`}>Proposed schedule</button>
-          <button onClick={() => setMode("principal")} className={`rounded-md px-3 py-1.5 text-sm font-medium ${mode === "principal" ? "bg-blue-600 text-white" : "text-slate-600"}`}>Principal roster</button>
+        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5 shadow-sm">
+          <button onClick={() => setMode("proposed")} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${mode === "proposed" ? "bg-indigo-600 text-white" : "text-slate-600"}`}>Proposed schedule</button>
+          <button onClick={() => setMode("principal")} className={`rounded-lg px-3 py-1.5 text-sm font-medium ${mode === "principal" ? "bg-indigo-600 text-white" : "text-slate-600"}`}>Principal roster</button>
         </div>
         <div className="ml-auto flex gap-2">
-          <button onClick={copy} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"><Copy size={14} /> {copied ? "Copied!" : "Copy as text"}</button>
-          <button onClick={() => window.print()} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"><Printer size={14} /> Print</button>
+          <button onClick={copy} className={BTN_GHOST}><Copy size={14} /> {copied ? "Copied!" : "Copy as text"}</button>
+          <button onClick={() => window.print()} className={BTN_GHOST}><Printer size={14} /> Print</button>
         </div>
       </div>
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <h3 className="text-lg font-bold text-slate-800">{seasonName} — {mode === "principal" ? "Confirmed Enrichment Classes" : "Proposed Enrichment Schedule"}</h3>
+      <div className={CARD + " p-5"}>
+        <h3 className="text-lg font-bold text-slate-900">{seasonName} — {mode === "principal" ? "Confirmed Enrichment Classes" : "Proposed Enrichment Schedule"}</h3>
         <p className="mb-4 text-xs text-slate-400">{mode === "principal" ? "Locked in for the season." : "Draft for review — subject to vendor confirmation."}</p>
         <div className="overflow-x-auto"><ClassTable rows={ordered} showStatus={mode === "proposed"} /></div>
         {ordered.length === 0 && <p className="py-6 text-center text-sm text-slate-400">Nothing to show yet.</p>}
@@ -667,156 +816,26 @@ function HistoricalSeason({ season }) {
   const fill = cap ? Math.round((enrolled / cap) * 100) : 0;
   const ordered = [...cls].sort((a, b) => DAYS.indexOf(a.day) - DAYS.indexOf(b.day) || (a.start || "").localeCompare(b.start || ""));
   const Stat = ({ label, value }) => (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-      <div className="text-xl font-bold text-slate-800">{value}</div>
+    <div className={CARD + " px-4 py-3"}>
+      <div className="text-xl font-bold text-slate-900">{value}</div>
       <div className="text-xs text-slate-500">{label}</div>
     </div>
   );
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-600"><History size={15} /> {season.yearLong ? "Year-round music program — read only." : "Historical season — read only."}</div>
+      <div className="flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-600">
+        {season.yearLong ? <Music size={15} /> : <History size={15} />} {season.yearLong ? "Year-round music program — read only." : "Historical season — read only."}
+      </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Classes offered" value={cls.length} />
         <Stat label="Completed" value={completed.length} />
         <Stat label="Cancelled" value={cancelled.length} />
         <Stat label="Seats filled" value={`${fill}%`} />
       </div>
-      <div className="rounded-2xl border border-slate-200 bg-white p-4"><PlanBoard classes={cls} readOnly /></div>
-      <div className="rounded-2xl border border-slate-200 bg-white p-5">
+      <div className={CARD + " p-4"}><PlanBoard classes={cls} readOnly /></div>
+      <div className={CARD + " p-5"}>
         <h3 className="mb-3 text-sm font-semibold text-slate-700">All classes</h3>
         <div className="overflow-x-auto"><ClassTable rows={ordered} historical /></div>
-      </div>
-    </div>
-  );
-}
-
-/* ---------------- insights ---------------- */
-
-function RoomRow({ name, onRename, onRemove }) {
-  const [val, setVal] = useState(name);
-  useEffect(() => setVal(name), [name]);
-  const commit = () => { const v = val.trim(); if (v && v !== name) onRename(name, v); else setVal(name); };
-  return (
-    <div className="flex items-center gap-2">
-      <input className={inputCls + " flex-1"} value={val} onChange={(e) => setVal(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
-      <button onClick={onRemove} className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500"><Trash2 size={14} /></button>
-    </div>
-  );
-}
-
-function InsightsView({ classes, rooms, onRooms, onRename }) {
-  const [newRoom, setNewRoom] = useState("");
-  const used = [...new Set(classes.map((c) => c.room).filter(Boolean))];
-  const allRooms = [...new Set([...(rooms || []), ...used])];
-  const conflicts = roomConflicts(classes);
-  const conflictIds = new Set();
-  conflicts.forEach(([a, b]) => { conflictIds.add(a.id); conflictIds.add(b.id); });
-
-  const addRoom = () => { const r = newRoom.trim(); if (r && !(rooms || []).some((x) => sameRoom(x, r))) onRooms([...(rooms || []), r]); setNewRoom(""); };
-  const removeRoom = (i) => onRooms(rooms.filter((_, x) => x !== i));
-
-  const Head = ({ cols }) => (
-    <div className="grid" style={{ gridTemplateColumns: cols }}>
-      <div />{DAYS.map((d) => <div key={d} className="pb-2 text-center text-sm font-semibold text-slate-600">{d}</div>)}
-    </div>
-  );
-
-  return (
-    <div className="space-y-6">
-      {conflicts.length > 0 && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-          <p className="flex items-center gap-2 text-sm font-semibold text-red-700"><AlertTriangle size={15} /> {conflicts.length} room conflict{conflicts.length > 1 ? "s" : ""}</p>
-          <ul className="mt-1 space-y-0.5 text-xs text-red-600">
-            {conflicts.map(([a, b], i) => <li key={i}>“{a.name}” &amp; “{b.name}” — {a.room}, {a.day} ({fmtTime(a.start)}–{fmtTime(a.end)} vs {fmtTime(b.start)}–{fmtTime(b.end)})</li>)}
-          </ul>
-        </div>
-      )}
-
-      {/* room schedule */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-4">
-        <h3 className="mb-3 text-sm font-semibold text-slate-700">Room schedule — what's free where</h3>
-        <div className="overflow-x-auto"><div style={{ minWidth: 720 }}>
-          <Head cols="150px repeat(5, 1fr)" />
-          {allRooms.length === 0 && <p className="py-2 text-sm text-slate-400">No rooms yet — add some below.</p>}
-          {allRooms.map((room) => (
-            <div key={room} className="grid border-t border-slate-100" style={{ gridTemplateColumns: "150px repeat(5, 1fr)" }}>
-              <div className="flex items-center py-2 pr-2 text-sm font-medium text-slate-600">{room}</div>
-              {DAYS.map((day) => {
-                const inCell = classes.filter((c) => sameRoom(c.room, room) && c.day === day);
-                const conflict = inCell.some((c) => conflictIds.has(c.id));
-                return (
-                  <div key={day} className={`space-y-0.5 border-l border-slate-100 p-1.5 ${conflict ? "bg-red-50" : ""}`}>
-                    {inCell.length === 0
-                      ? <span className="text-xs text-emerald-500">free</span>
-                      : inCell.map((c) => <div key={c.id} className={`truncate text-xs ${conflict ? "font-medium text-red-600" : "text-slate-600"}`}>{c.name} · {fmtTime(c.start)}</div>)}
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div></div>
-      </div>
-
-      {/* grade coverage */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-4">
-        <h3 className="text-sm font-semibold text-slate-700">Grade coverage — an option for every grade, each day</h3>
-        <p className="mb-3 text-xs text-slate-400">Green where at least one class that day includes that grade.</p>
-        <div className="overflow-x-auto"><div style={{ minWidth: 520 }}>
-          <Head cols="90px repeat(5, 1fr)" />
-          {GRADES.map((g, gi) => (
-            <div key={g} className="grid border-t border-slate-100" style={{ gridTemplateColumns: "90px repeat(5, 1fr)" }}>
-              <div className="flex items-center py-2 pr-2 text-sm font-medium text-slate-600">Grade {g}</div>
-              {DAYS.map((day) => {
-                const ok = classes.some((c) => c.day === day && c.gradeFrom != null && c.gradeTo != null && gi >= c.gradeFrom && gi <= c.gradeTo);
-                return (
-                  <div key={day} className="flex items-center justify-center border-l border-slate-100 py-2">
-                    {ok ? <span className="grid h-5 w-5 place-items-center rounded-full bg-emerald-100 text-emerald-600"><Check size={12} /></span>
-                        : <span className="grid h-5 w-5 place-items-center rounded-full bg-red-50 text-xs text-red-300">·</span>}
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div></div>
-      </div>
-
-      {/* category balance */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-4">
-        <h3 className="text-sm font-semibold text-slate-700">Category balance across the week</h3>
-        <p className="mb-3 text-xs text-slate-400">Classes per category each day, with the week's total. Zeros flag thin spots.</p>
-        <div className="overflow-x-auto"><div style={{ minWidth: 580 }}>
-          <div className="grid" style={{ gridTemplateColumns: "130px repeat(5, 1fr) 70px" }}>
-            <div />{DAYS.map((d) => <div key={d} className="pb-2 text-center text-sm font-semibold text-slate-600">{d}</div>)}
-            <div className="pb-2 text-center text-xs font-semibold text-slate-400">Week</div>
-          </div>
-          {CATS.map((cat) => {
-            const total = classes.filter((c) => c.type === cat).length;
-            return (
-              <div key={cat} className="grid border-t border-slate-100" style={{ gridTemplateColumns: "130px repeat(5, 1fr) 70px" }}>
-                <div className="flex items-center gap-2 py-2 pr-2"><span className={`h-2.5 w-2.5 rounded-full ${cs(cat).dot}`} /><span className="text-sm font-medium text-slate-600">{CAT_LABEL[cat]}</span></div>
-                {DAYS.map((day) => {
-                  const n = classes.filter((c) => c.type === cat && c.day === day).length;
-                  return <div key={day} className="flex items-center justify-center border-l border-slate-100 py-2 text-sm">{n > 0 ? <span className="font-medium text-slate-700">{n}</span> : <span className="text-slate-300">0</span>}</div>;
-                })}
-                <div className="flex items-center justify-center py-2 text-sm font-semibold text-slate-500">{total}</div>
-              </div>
-            );
-          })}
-        </div></div>
-      </div>
-
-      {/* rooms manager */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-4">
-        <h3 className="mb-1 text-sm font-semibold text-slate-700">Rooms</h3>
-        <p className="mb-3 text-xs text-slate-400">Rooms you can assign to a class. Renaming one updates every class using it.</p>
-        <div className="max-w-md space-y-1.5">
-          {(rooms || []).map((r, i) => <RoomRow key={i} name={r} onRename={onRename} onRemove={() => removeRoom(i)} />)}
-          {(rooms || []).length === 0 && <p className="text-sm text-slate-400">No rooms yet.</p>}
-        </div>
-        <div className="mt-3 flex max-w-md gap-2">
-          <input className={inputCls} placeholder="Add a room…" value={newRoom} onChange={(e) => setNewRoom(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addRoom()} />
-          <button onClick={addRoom} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">Add</button>
-        </div>
       </div>
     </div>
   );
@@ -835,6 +854,9 @@ export default function EnrichmentBoard() {
   const [linkSent, setLinkSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const saveTimer = useRef(null);
+  const dataRef = useRef(data);
+  const loadedUid = useRef("__init__");
+  useEffect(() => { dataRef.current = data; }, [data]);
 
   useEffect(() => {
     if (!supabaseEnabled) return;
@@ -843,21 +865,34 @@ export default function EnrichmentBoard() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  // cloud load whenever auth resolves or session changes (anon can read, too)
+  // Load cloud data only when the signed-in identity actually changes (initial, sign-in,
+  // sign-out) — NOT on token refresh, which fires when the tab regains focus and would
+  // otherwise discard in-progress edits.
   useEffect(() => {
     if (!supabaseEnabled || !authReady) return;
+    const uid = session?.user?.id || "anon";
+    if (loadedUid.current === uid) return;
+    loadedUid.current = uid;
     let cancelled = false;
     setData(null);
-    cloudLoad(!!session).then((d) => { if (!cancelled) setData(d); }).catch(() => { if (!cancelled) setData(combine([newEditableSeason()], null)); });
+    cloudLoad(!!session).then((d) => { if (!cancelled) setData(d); }).catch(() => { if (!cancelled) setData(combine(newEditableSeasons(), null)); });
     return () => { cancelled = true; };
   }, [authReady, session]);
 
-  // save (only when signed in)
+  // Save (only when signed in), debounced.
   useEffect(() => {
     if (!data) return;
     if (!supabaseEnabled) { persistLocal(data); return; }
-    if (session) { clearTimeout(saveTimer.current); saveTimer.current = setTimeout(() => { cloudSave(data).catch(() => {}); }, 800); }
+    if (session) { clearTimeout(saveTimer.current); saveTimer.current = setTimeout(() => { cloudSave(data).catch(() => {}); }, 700); }
   }, [data]);
+
+  // Flush a save immediately when the tab is hidden, so nothing is lost on tab switch.
+  useEffect(() => {
+    if (!supabaseEnabled) return;
+    const flush = () => { if (document.visibilityState === "hidden" && session && dataRef.current) cloudSave(dataRef.current).catch(() => {}); };
+    document.addEventListener("visibilitychange", flush);
+    return () => document.removeEventListener("visibilitychange", flush);
+  }, [session]);
 
   const sendLink = async () => {
     if (!email.trim()) return;
@@ -871,13 +906,17 @@ export default function EnrichmentBoard() {
   if (supabaseEnabled && !authReady) return <div className="flex h-64 items-center justify-center text-slate-400">Connecting…</div>;
   if (!data) return <div className="flex h-64 items-center justify-center text-slate-400">Syncing…</div>;
 
-  const currentSeason = data.seasons.find((s) => s.editable);
-  const season = data.seasons.find((s) => s.id === data.activeSeasonId) || currentSeason || data.seasons[data.seasons.length - 1];
+  const editableSeasons = data.seasons.filter((s) => s.editable);
+  const firstEditable = editableSeasons[0];
+  const season = data.seasons.find((s) => s.id === data.activeSeasonId) || firstEditable || data.seasons[data.seasons.length - 1];
   const classes = season.classes;
   const isCurrent = season.editable;
   const canEdit = isCurrent && (!supabaseEnabled || !!session);
-  const setClasses = (updater) => setData((d) => ({ ...d, seasons: d.seasons.map((s) => (s.id === season.id ? { ...s, classes: updater(s.classes) } : s)) }));
+  const conflicts = roomConflicts(classes);
+  const conflictIds = new Set();
+  conflicts.forEach(([a, b]) => { conflictIds.add(a.id); conflictIds.add(b.id); });
 
+  const setClasses = (updater) => setData((d) => ({ ...d, seasons: d.seasons.map((s) => (s.id === season.id ? { ...s, classes: updater(s.classes) } : s)) }));
   const upsert = (c) => { setClasses((list) => (list.some((x) => x.id === c.id) ? list.map((x) => (x.id === c.id ? c : x)) : [...list, { ...c, id: genId() }])); setForm(null); };
   const remove = (id) => { if (window.confirm("Delete this class?")) setClasses((list) => list.filter((x) => x.id !== id)); };
   const toggleConfirm = (id) => setClasses((list) => list.map((c) => (c.id === id ? { ...c, status: c.status === "confirmed" ? "proposed" : "confirmed" } : c)));
@@ -887,7 +926,7 @@ export default function EnrichmentBoard() {
     const nn = newName.trim(); if (!nn) return;
     setData((d) => ({ ...d, seasons: d.seasons.map((s) => {
       if (s.id !== season.id) return s;
-      const rooms = [...new Set((s.rooms || []).map((r) => (r === oldName ? nn : r)))];
+      const rooms = uniq((s.rooms || []).map((r) => (r === oldName ? nn : r)));
       const cls = s.classes.map((c) => (sameRoom(c.room, oldName) ? { ...c, room: nn } : c));
       return { ...s, rooms, classes: cls };
     }) }));
@@ -895,85 +934,91 @@ export default function EnrichmentBoard() {
   const dropCell = (day, type) => { if (dragId) setClasses((list) => list.map((c) => (c.id === dragId ? { ...c, day, type } : c))); setDragId(null); };
   const blank = (day, type) => ({ name: "", type: type || "Art", gradeFrom: 0, gradeTo: 5, day: day || "Mon", start: "16:00", end: "17:00", room: "", status: "proposed", vendors: [] });
   const addToCell = (day, type) => setForm(blank(day, type));
-  const resetSeason = () => { if (window.confirm("Reset the current season back to empty?")) { const ed = newEditableSeason(); setData({ seasons: [...historicalSeasons(), ed], activeSeasonId: ed.id }); } };
 
   const needVendor = canEdit ? classes.filter((c) => (c.vendors || []).length === 0).length : 0;
-  const conflicts = canEdit ? roomConflicts(classes) : [];
 
   const TabBtn = ({ id, icon: Icon, label, badge }) => (
-    <button onClick={() => setTab(id)} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${tab === id ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
-      <Icon size={16} /> {label}
-      {badge > 0 && <span className={`rounded-full px-1.5 text-xs ${tab === id ? "bg-blue-500 text-white" : "bg-amber-100 text-amber-700"}`}>{badge}</span>}
+    <button onClick={() => setTab(id)} className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold transition ${tab === id ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}>
+      <Icon size={15} /> {label}
+      {badge > 0 && <span className={`rounded-full px-1.5 text-xs ${tab === id ? "bg-indigo-500 text-white" : "bg-amber-100 text-amber-700"}`}>{badge}</span>}
     </button>
   );
 
   const signInBar = (
-    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
-      <Lock size={16} className="shrink-0 text-blue-600" />
-      <span className="text-sm text-blue-800">You're viewing the current season read-only. Sign in to plan and edit.</span>
+    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3">
+      <Lock size={16} className="shrink-0 text-indigo-600" />
+      <span className="text-sm text-indigo-900">You're viewing this season read-only. Sign in to plan and edit.</span>
       <div className="ml-auto flex items-center gap-2">
         {linkSent ? <span className="text-sm text-emerald-700">Check your email for the link.</span> : (
           <>
-            <input className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:outline-none" type="email" placeholder="you@school.org" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendLink()} />
-            <button onClick={sendLink} disabled={busy} className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{busy ? "Sending…" : "Sign in"}</button>
+            <input className="rounded-xl border border-slate-200 px-3 py-1.5 text-sm focus:outline-none" type="email" placeholder="you@school.org" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendLink()} />
+            <button onClick={sendLink} disabled={busy} className={BTN + " py-1.5"}>{busy ? "Sending…" : "Sign in"}</button>
           </>
         )}
       </div>
     </div>
   );
 
+  const subtitle = isCurrent
+    ? (season.kind === "music" ? "Planning the year-round music program" : "Planning the upcoming enrichment season")
+    : "Mann Elementary · read-only record";
+
   return (
-    <div className="min-h-screen bg-slate-50 p-4 text-slate-800 sm:p-6" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight text-slate-800">
-              <span className="grid h-8 w-8 place-items-center rounded-lg bg-blue-600 text-white"><LayoutGrid size={18} /></span>
-              Enrichment Planning Board
-            </h1>
-            <p className="mt-0.5 flex items-center gap-1.5 text-sm text-slate-500">
-              {isCurrent ? "Planning the upcoming season" : "Mann Elementary · past season"}
-              {supabaseEnabled && session && isCurrent && <span className="flex items-center gap-1 text-emerald-600"><Cloud size={13} /> synced</span>}
-            </p>
+    <div className="min-h-screen text-slate-800" style={{ background: "linear-gradient(180deg,#F7F8FC 0%,#EEF1F8 100%)" }}>
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+        <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="grid h-11 w-11 place-items-center rounded-2xl bg-indigo-600 text-white shadow-sm"><LayoutGrid size={20} /></span>
+            <div>
+              <h1 className="text-lg font-bold tracking-tight text-slate-900">Enrichment Planning Board</h1>
+              <p className="flex items-center gap-1.5 text-sm text-slate-500">
+                {subtitle}
+                {supabaseEnabled && session && isCurrent && <span className="flex items-center gap-1 text-emerald-600"><Cloud size={13} /> synced</span>}
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
-            <select value={data.activeSeasonId} onChange={(e) => { setData((d) => ({ ...d, activeSeasonId: e.target.value })); setTab("plan"); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 focus:border-blue-400 focus:outline-none">
-              {data.seasons.map((s) => <option key={s.id} value={s.id}>{s.name}{s.editable ? "  (current)" : ""}</option>)}
+            <select value={data.activeSeasonId} onChange={(e) => { setData((d) => ({ ...d, activeSeasonId: e.target.value })); setTab("plan"); }} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm focus:border-indigo-400 focus:outline-none">
+              <optgroup label="Planning">
+                {data.seasons.filter((s) => s.editable).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </optgroup>
+              <optgroup label="History">
+                {data.seasons.filter((s) => !s.editable).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </optgroup>
             </select>
             {supabaseEnabled && (session
-              ? <button onClick={signOut} title={session.user?.email} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"><LogOut size={15} /> Sign out</button>
-              : <button onClick={() => currentSeason && setData((d) => ({ ...d, activeSeasonId: currentSeason.id }))} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"><Lock size={15} /> Staff sign-in</button>)}
+              ? <button onClick={signOut} title={session.user?.email} className={BTN_GHOST}><LogOut size={15} /> Sign out</button>
+              : <button onClick={() => firstEditable && setData((d) => ({ ...d, activeSeasonId: firstEditable.id }))} className={BTN}><Lock size={15} /> Staff sign-in</button>)}
           </div>
-        </div>
+        </header>
 
         {!isCurrent ? (
           <HistoricalSeason season={season} />
         ) : canEdit ? (
           <>
-            <div className="mb-4 flex flex-wrap items-center gap-1.5">
-              <TabBtn id="plan" icon={LayoutGrid} label="Plan" />
-              <TabBtn id="insights" icon={BarChart3} label="Insights" badge={conflicts.length} />
+            <div className="mb-5 inline-flex flex-wrap rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+              <TabBtn id="plan" icon={LayoutGrid} label="Plan" badge={conflicts.length} />
               <TabBtn id="vendors" icon={Store} label="Vendors" badge={needVendor} />
               <TabBtn id="season" icon={CheckCircle2} label="Season" />
               <TabBtn id="share" icon={Share2} label="Share" />
             </div>
             {tab === "plan" && (
-              <div>
-                <div className="mb-3 flex justify-end">
-                  <button onClick={() => setForm(blank())} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"><Plus size={15} /> Add class</button>
-                </div>
-                {conflicts.length > 0 && (
-                  <div className="mb-3 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
-                    <AlertTriangle size={15} /> {conflicts.length} room conflict{conflicts.length > 1 ? "s" : ""} — see the Insights tab.
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    {conflicts.length > 0 && (
+                      <span className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700"><AlertTriangle size={15} /> {conflicts.length} room conflict{conflicts.length > 1 ? "s" : ""}</span>
+                    )}
                   </div>
-                )}
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                  {classes.length === 0 && <p className="mb-2 text-center text-sm text-slate-400">Empty season — add classes into the day/activity cells below to start planning.</p>}
-                  <PlanBoard classes={classes} setDragId={setDragId} onDropCell={dropCell} onAdd={addToCell} onEdit={setForm} onDelete={remove} onToggleConfirm={toggleConfirm} />
+                  <button onClick={() => setForm(blank())} className={BTN}><Plus size={15} /> Add class</button>
                 </div>
+                <div className={CARD + " p-4"}>
+                  {classes.length === 0 && <p className="mb-2 text-center text-sm text-slate-400">Empty season — add classes into the day / activity cells below to start planning.</p>}
+                  <PlanBoard classes={classes} conflictIds={conflictIds} setDragId={setDragId} onDropCell={dropCell} onAdd={addToCell} onEdit={setForm} onDelete={remove} onToggleConfirm={toggleConfirm} />
+                </div>
+                <InsightsPanels classes={classes} rooms={season.rooms || []} onRooms={setSeasonRooms} onRename={renameRoom} canEdit />
               </div>
             )}
-            {tab === "insights" && <InsightsView classes={classes} rooms={season.rooms || []} onRooms={setSeasonRooms} onRename={renameRoom} />}
             {tab === "vendors" && <VendorsView classes={classes} onClassVendors={setClassVendors} onEdit={setForm} />}
             {tab === "season" && <SeasonView classes={classes} />}
             {tab === "share" && <ShareView classes={classes} seasonName={season.name} />}
@@ -981,16 +1026,11 @@ export default function EnrichmentBoard() {
         ) : (
           <div className="space-y-4">
             {signInBar}
-            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className={CARD + " p-4"}>
               {classes.length === 0 && <p className="mb-2 text-center text-sm text-slate-400">This season doesn't have any classes yet.</p>}
               <PlanBoard classes={classes} readOnly />
             </div>
-          </div>
-        )}
-
-        {canEdit && (
-          <div className="mt-6 flex justify-end">
-            <button onClick={resetSeason} className="text-xs text-slate-400 hover:text-slate-600">Reset current season</button>
+            <InsightsPanels classes={classes} rooms={season.rooms || []} onRooms={() => {}} onRename={() => {}} canEdit={false} />
           </div>
         )}
       </div>
