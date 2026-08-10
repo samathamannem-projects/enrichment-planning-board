@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   LayoutGrid, Store, CheckCircle2, Share2, Plus, Pencil, Trash2, X,
   Check, Clock, MapPin, AlertTriangle, ArrowUp, Printer, Copy, Star,
-  ChevronRight, History, User, Lock, LogOut, Cloud, Music,
+  ChevronRight, History, User, Lock, LogOut, Cloud, Music, BarChart3,
 } from "lucide-react";
 import { HISTORICAL_RAW } from "./historicalSeasons.js";
 import { supabase, supabaseEnabled } from "./supabaseClient.js";
@@ -48,6 +48,24 @@ const firstChoice = (c) => {
   const v = c.vendors || [];
   return v.filter((x) => x.status !== "declined")[0] || v[0] || null;
 };
+
+/* rooms + conflicts */
+const toMin = (t) => { if (!t) return null; const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+const sameRoom = (x, y) => !!x && !!y && x.trim().toLowerCase() === y.trim().toLowerCase();
+function timesOverlap(a, b) {
+  const as = toMin(a.start), ae = toMin(a.end), bs = toMin(b.start), be = toMin(b.end);
+  if (as == null || ae == null || bs == null || be == null) return true; // unknown time -> treat as overlap
+  return as < be && bs < ae;
+}
+function roomConflicts(classes) {
+  const list = []; const withRoom = classes.filter((c) => c.room && c.day);
+  for (let i = 0; i < withRoom.length; i++) for (let j = i + 1; j < withRoom.length; j++) {
+    const a = withRoom[i], b = withRoom[j];
+    if (a.day === b.day && sameRoom(a.room, b.room) && timesOverlap(a, b)) list.push([a, b]);
+  }
+  return list;
+}
+const KNOWN_ROOMS = [...new Set(HISTORICAL_RAW.flatMap((s) => s.classes.map((c) => c.room)).map((r) => (r || "").trim()).filter(Boolean))].sort();
 
 /* grades */
 function parseBand(b) {
@@ -127,8 +145,14 @@ function seedMusic(season) {
   return { ...season, musicSeeded: true, classes: [...musicClasses, ...(season.classes || [])] };
 }
 
+function prepareSeason(season) {
+  let s = seedMusic(season);
+  if (!s.rooms) s = { ...s, rooms: [...KNOWN_ROOMS] };
+  return s;
+}
+
 function combine(editableSeasons, activeSeasonId) {
-  const seeded = editableSeasons.map(seedMusic);
+  const seeded = editableSeasons.map(prepareSeason);
   const seasons = [...historicalSeasons(), ...seeded];
   if (!seasons.find((s) => s.id === activeSeasonId)) activeSeasonId = seeded[0]?.id || seasons[0].id;
   return { seasons, activeSeasonId };
@@ -227,7 +251,7 @@ function CatalogPicker({ onPick }) {
   );
 }
 
-function ClassForm({ initial, onSave, onClose }) {
+function ClassForm({ initial, onSave, onClose, rooms }) {
   const [f, setF] = useState(initial);
   const [note, setNote] = useState("");
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -257,7 +281,11 @@ function ClassForm({ initial, onSave, onClose }) {
         <Field label="Grade to"><select className={inputCls} value={f.gradeTo} onChange={(e) => set("gradeTo", Number(e.target.value))}>{GRADES.map((g, i) => <option key={g} value={i}>{g}</option>)}</select></Field>
         <Field label="Start time"><input type="time" className={inputCls} value={f.start} onChange={(e) => set("start", e.target.value)} /></Field>
         <Field label="End time"><input type="time" className={inputCls} value={f.end} onChange={(e) => set("end", e.target.value)} /></Field>
-        <Field label="Room"><input className={inputCls} value={f.room} onChange={(e) => set("room", e.target.value)} placeholder="e.g. Art Room" /></Field>
+        <Field label="Room"><select className={inputCls} value={f.room} onChange={(e) => set("room", e.target.value)}>
+          <option value="">— none —</option>
+          {f.room && !(rooms || []).includes(f.room) && <option value={f.room}>{f.room}</option>}
+          {(rooms || []).map((r) => <option key={r} value={r}>{r}</option>)}
+        </select></Field>
         <Field label="Status"><select className={inputCls} value={f.status} onChange={(e) => set("status", e.target.value)}>{Object.keys(STATUS).map((s) => <option key={s} value={s}>{STATUS[s].label}</option>)}</select></Field>
       </div>
 
@@ -662,6 +690,138 @@ function HistoricalSeason({ season }) {
   );
 }
 
+/* ---------------- insights ---------------- */
+
+function RoomRow({ name, onRename, onRemove }) {
+  const [val, setVal] = useState(name);
+  useEffect(() => setVal(name), [name]);
+  const commit = () => { const v = val.trim(); if (v && v !== name) onRename(name, v); else setVal(name); };
+  return (
+    <div className="flex items-center gap-2">
+      <input className={inputCls + " flex-1"} value={val} onChange={(e) => setVal(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
+      <button onClick={onRemove} className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500"><Trash2 size={14} /></button>
+    </div>
+  );
+}
+
+function InsightsView({ classes, rooms, onRooms, onRename }) {
+  const [newRoom, setNewRoom] = useState("");
+  const used = [...new Set(classes.map((c) => c.room).filter(Boolean))];
+  const allRooms = [...new Set([...(rooms || []), ...used])];
+  const conflicts = roomConflicts(classes);
+  const conflictIds = new Set();
+  conflicts.forEach(([a, b]) => { conflictIds.add(a.id); conflictIds.add(b.id); });
+
+  const addRoom = () => { const r = newRoom.trim(); if (r && !(rooms || []).some((x) => sameRoom(x, r))) onRooms([...(rooms || []), r]); setNewRoom(""); };
+  const removeRoom = (i) => onRooms(rooms.filter((_, x) => x !== i));
+
+  const Head = ({ cols }) => (
+    <div className="grid" style={{ gridTemplateColumns: cols }}>
+      <div />{DAYS.map((d) => <div key={d} className="pb-2 text-center text-sm font-semibold text-slate-600">{d}</div>)}
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      {conflicts.length > 0 && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+          <p className="flex items-center gap-2 text-sm font-semibold text-red-700"><AlertTriangle size={15} /> {conflicts.length} room conflict{conflicts.length > 1 ? "s" : ""}</p>
+          <ul className="mt-1 space-y-0.5 text-xs text-red-600">
+            {conflicts.map(([a, b], i) => <li key={i}>“{a.name}” &amp; “{b.name}” — {a.room}, {a.day} ({fmtTime(a.start)}–{fmtTime(a.end)} vs {fmtTime(b.start)}–{fmtTime(b.end)})</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* room schedule */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <h3 className="mb-3 text-sm font-semibold text-slate-700">Room schedule — what's free where</h3>
+        <div className="overflow-x-auto"><div style={{ minWidth: 720 }}>
+          <Head cols="150px repeat(5, 1fr)" />
+          {allRooms.length === 0 && <p className="py-2 text-sm text-slate-400">No rooms yet — add some below.</p>}
+          {allRooms.map((room) => (
+            <div key={room} className="grid border-t border-slate-100" style={{ gridTemplateColumns: "150px repeat(5, 1fr)" }}>
+              <div className="flex items-center py-2 pr-2 text-sm font-medium text-slate-600">{room}</div>
+              {DAYS.map((day) => {
+                const inCell = classes.filter((c) => sameRoom(c.room, room) && c.day === day);
+                const conflict = inCell.some((c) => conflictIds.has(c.id));
+                return (
+                  <div key={day} className={`space-y-0.5 border-l border-slate-100 p-1.5 ${conflict ? "bg-red-50" : ""}`}>
+                    {inCell.length === 0
+                      ? <span className="text-xs text-emerald-500">free</span>
+                      : inCell.map((c) => <div key={c.id} className={`truncate text-xs ${conflict ? "font-medium text-red-600" : "text-slate-600"}`}>{c.name} · {fmtTime(c.start)}</div>)}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div></div>
+      </div>
+
+      {/* grade coverage */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <h3 className="text-sm font-semibold text-slate-700">Grade coverage — an option for every grade, each day</h3>
+        <p className="mb-3 text-xs text-slate-400">Green where at least one class that day includes that grade.</p>
+        <div className="overflow-x-auto"><div style={{ minWidth: 520 }}>
+          <Head cols="90px repeat(5, 1fr)" />
+          {GRADES.map((g, gi) => (
+            <div key={g} className="grid border-t border-slate-100" style={{ gridTemplateColumns: "90px repeat(5, 1fr)" }}>
+              <div className="flex items-center py-2 pr-2 text-sm font-medium text-slate-600">Grade {g}</div>
+              {DAYS.map((day) => {
+                const ok = classes.some((c) => c.day === day && c.gradeFrom != null && c.gradeTo != null && gi >= c.gradeFrom && gi <= c.gradeTo);
+                return (
+                  <div key={day} className="flex items-center justify-center border-l border-slate-100 py-2">
+                    {ok ? <span className="grid h-5 w-5 place-items-center rounded-full bg-emerald-100 text-emerald-600"><Check size={12} /></span>
+                        : <span className="grid h-5 w-5 place-items-center rounded-full bg-red-50 text-xs text-red-300">·</span>}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div></div>
+      </div>
+
+      {/* category balance */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <h3 className="text-sm font-semibold text-slate-700">Category balance across the week</h3>
+        <p className="mb-3 text-xs text-slate-400">Classes per category each day, with the week's total. Zeros flag thin spots.</p>
+        <div className="overflow-x-auto"><div style={{ minWidth: 580 }}>
+          <div className="grid" style={{ gridTemplateColumns: "130px repeat(5, 1fr) 70px" }}>
+            <div />{DAYS.map((d) => <div key={d} className="pb-2 text-center text-sm font-semibold text-slate-600">{d}</div>)}
+            <div className="pb-2 text-center text-xs font-semibold text-slate-400">Week</div>
+          </div>
+          {CATS.map((cat) => {
+            const total = classes.filter((c) => c.type === cat).length;
+            return (
+              <div key={cat} className="grid border-t border-slate-100" style={{ gridTemplateColumns: "130px repeat(5, 1fr) 70px" }}>
+                <div className="flex items-center gap-2 py-2 pr-2"><span className={`h-2.5 w-2.5 rounded-full ${cs(cat).dot}`} /><span className="text-sm font-medium text-slate-600">{CAT_LABEL[cat]}</span></div>
+                {DAYS.map((day) => {
+                  const n = classes.filter((c) => c.type === cat && c.day === day).length;
+                  return <div key={day} className="flex items-center justify-center border-l border-slate-100 py-2 text-sm">{n > 0 ? <span className="font-medium text-slate-700">{n}</span> : <span className="text-slate-300">0</span>}</div>;
+                })}
+                <div className="flex items-center justify-center py-2 text-sm font-semibold text-slate-500">{total}</div>
+              </div>
+            );
+          })}
+        </div></div>
+      </div>
+
+      {/* rooms manager */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <h3 className="mb-1 text-sm font-semibold text-slate-700">Rooms</h3>
+        <p className="mb-3 text-xs text-slate-400">Rooms you can assign to a class. Renaming one updates every class using it.</p>
+        <div className="max-w-md space-y-1.5">
+          {(rooms || []).map((r, i) => <RoomRow key={i} name={r} onRename={onRename} onRemove={() => removeRoom(i)} />)}
+          {(rooms || []).length === 0 && <p className="text-sm text-slate-400">No rooms yet.</p>}
+        </div>
+        <div className="mt-3 flex max-w-md gap-2">
+          <input className={inputCls} placeholder="Add a room…" value={newRoom} onChange={(e) => setNewRoom(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addRoom()} />
+          <button onClick={addRoom} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">Add</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- main ---------------- */
 
 export default function EnrichmentBoard() {
@@ -722,12 +882,23 @@ export default function EnrichmentBoard() {
   const remove = (id) => { if (window.confirm("Delete this class?")) setClasses((list) => list.filter((x) => x.id !== id)); };
   const toggleConfirm = (id) => setClasses((list) => list.map((c) => (c.id === id ? { ...c, status: c.status === "confirmed" ? "proposed" : "confirmed" } : c)));
   const setClassVendors = (id, vendors) => setClasses((list) => list.map((c) => (c.id === id ? { ...c, vendors } : c)));
+  const setSeasonRooms = (rooms) => setData((d) => ({ ...d, seasons: d.seasons.map((s) => (s.id === season.id ? { ...s, rooms } : s)) }));
+  const renameRoom = (oldName, newName) => {
+    const nn = newName.trim(); if (!nn) return;
+    setData((d) => ({ ...d, seasons: d.seasons.map((s) => {
+      if (s.id !== season.id) return s;
+      const rooms = [...new Set((s.rooms || []).map((r) => (r === oldName ? nn : r)))];
+      const cls = s.classes.map((c) => (sameRoom(c.room, oldName) ? { ...c, room: nn } : c));
+      return { ...s, rooms, classes: cls };
+    }) }));
+  };
   const dropCell = (day, type) => { if (dragId) setClasses((list) => list.map((c) => (c.id === dragId ? { ...c, day, type } : c))); setDragId(null); };
   const blank = (day, type) => ({ name: "", type: type || "Art", gradeFrom: 0, gradeTo: 5, day: day || "Mon", start: "16:00", end: "17:00", room: "", status: "proposed", vendors: [] });
   const addToCell = (day, type) => setForm(blank(day, type));
   const resetSeason = () => { if (window.confirm("Reset the current season back to empty?")) { const ed = newEditableSeason(); setData({ seasons: [...historicalSeasons(), ed], activeSeasonId: ed.id }); } };
 
   const needVendor = canEdit ? classes.filter((c) => (c.vendors || []).length === 0).length : 0;
+  const conflicts = canEdit ? roomConflicts(classes) : [];
 
   const TabBtn = ({ id, icon: Icon, label, badge }) => (
     <button onClick={() => setTab(id)} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${tab === id ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
@@ -781,6 +952,7 @@ export default function EnrichmentBoard() {
           <>
             <div className="mb-4 flex flex-wrap items-center gap-1.5">
               <TabBtn id="plan" icon={LayoutGrid} label="Plan" />
+              <TabBtn id="insights" icon={BarChart3} label="Insights" badge={conflicts.length} />
               <TabBtn id="vendors" icon={Store} label="Vendors" badge={needVendor} />
               <TabBtn id="season" icon={CheckCircle2} label="Season" />
               <TabBtn id="share" icon={Share2} label="Share" />
@@ -790,12 +962,18 @@ export default function EnrichmentBoard() {
                 <div className="mb-3 flex justify-end">
                   <button onClick={() => setForm(blank())} className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"><Plus size={15} /> Add class</button>
                 </div>
+                {conflicts.length > 0 && (
+                  <div className="mb-3 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+                    <AlertTriangle size={15} /> {conflicts.length} room conflict{conflicts.length > 1 ? "s" : ""} — see the Insights tab.
+                  </div>
+                )}
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
                   {classes.length === 0 && <p className="mb-2 text-center text-sm text-slate-400">Empty season — add classes into the day/activity cells below to start planning.</p>}
                   <PlanBoard classes={classes} setDragId={setDragId} onDropCell={dropCell} onAdd={addToCell} onEdit={setForm} onDelete={remove} onToggleConfirm={toggleConfirm} />
                 </div>
               </div>
             )}
+            {tab === "insights" && <InsightsView classes={classes} rooms={season.rooms || []} onRooms={setSeasonRooms} onRename={renameRoom} />}
             {tab === "vendors" && <VendorsView classes={classes} onClassVendors={setClassVendors} onEdit={setForm} />}
             {tab === "season" && <SeasonView classes={classes} />}
             {tab === "share" && <ShareView classes={classes} seasonName={season.name} />}
@@ -817,7 +995,7 @@ export default function EnrichmentBoard() {
         )}
       </div>
 
-      {form && <ClassForm initial={form} onSave={upsert} onClose={() => setForm(null)} />}
+      {form && <ClassForm initial={form} onSave={upsert} onClose={() => setForm(null)} rooms={season.rooms || KNOWN_ROOMS} />}
     </div>
   );
 }
