@@ -594,18 +594,18 @@ function CoveragePanel({ classes }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <div className={CARD + " p-4"}>
-        <SectionHead icon={GraduationCap} title="Grade coverage" hint="Green where at least one class that day includes that grade." />
+        <SectionHead icon={GraduationCap} title="Classes per grade / day" hint="How many classes each grade can enroll in on each day. Red 0 means no option that day." />
         <div className="overflow-x-auto"><div style={{ minWidth: 380 }}>
           <DayHead />
           {GRADES.map((g, gi) => (
             <div key={g} className="grid border-t border-slate-100" style={{ gridTemplateColumns: "150px repeat(5, minmax(0, 1fr))" }}>
               <div className="flex items-center py-2 pr-2 text-sm font-medium text-slate-600">Grade {g}</div>
               {DAYS.map((day) => {
-                const ok = classes.some((c) => { const [gf, gt] = gradeRange(c); return c.day === day && gf != null && gt != null && gi >= gf && gi <= gt; });
+                const n = classes.filter((c) => { const [gf, gt] = gradeRange(c); return c.day === day && gf != null && gt != null && gi >= gf && gi <= gt; }).length;
                 return (
-                  <div key={day} className="flex items-center justify-center border-l border-slate-100 py-2">
-                    {ok ? <span className="grid h-5 w-5 place-items-center rounded-full bg-emerald-100 text-emerald-600"><Check size={12} /></span>
-                        : <span className="grid h-5 w-5 place-items-center rounded-full bg-red-50 text-xs text-red-300">·</span>}
+                  <div key={day} className="flex items-center justify-center border-l border-slate-100 py-2 text-sm">
+                    {n > 0 ? <span className="font-semibold text-slate-700">{n}</span>
+                           : <span className="grid h-5 w-5 place-items-center rounded-full bg-red-50 text-xs text-red-300">0</span>}
                   </div>
                 );
               })}
