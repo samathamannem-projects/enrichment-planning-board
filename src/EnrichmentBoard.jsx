@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, Fragment } from "react";
 import {
   LayoutGrid, Store, CheckCircle2, Share2, Plus, Pencil, Trash2, X, Check, Clock,
   MapPin, AlertTriangle, ArrowUp, Printer, Copy, Star, ChevronRight, History, User,
-  Lock, LogOut, Cloud, Music, DoorOpen, GraduationCap, Scale,
+  Lock, LogOut, Cloud, Music, DoorOpen, GraduationCap, Scale, MessageSquare, Search, ChevronDown,
 } from "lucide-react";
 import { HISTORICAL_RAW } from "./historicalSeasons.js";
 import { supabase, supabaseEnabled } from "./supabaseClient.js";
@@ -11,8 +11,8 @@ import { supabase, supabaseEnabled } from "./supabaseClient.js";
 
 const LKEY = "enrichment-board-v3";
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
-const CATS = ["STEM", "Art", "Movement", "Academic"];
-const CAT_LABEL = { STEM: "STEM / Chess", Art: "Art", Movement: "Movement", Academic: "Academic" };
+const CATS = ["STEM", "Art", "Movement", "Music", "Academic"];
+const CAT_LABEL = { STEM: "STEM / Chess", Art: "Art", Movement: "Movement", Music: "Music", Academic: "Academic" };
 const BALANCE = ["Art", "STEM", "Movement"];
 const GRADES = ["K", "1", "2", "3", "4", "5"];
 
@@ -25,6 +25,7 @@ const CAT_STYLE = {
   STEM:     { bar: "bg-blue-500",    dot: "bg-blue-500" },
   Art:      { bar: "bg-rose-500",    dot: "bg-rose-500" },
   Movement: { bar: "bg-emerald-500", dot: "bg-emerald-500" },
+  Music:    { bar: "bg-amber-500",   dot: "bg-amber-500" },
   Academic: { bar: "bg-violet-500",  dot: "bg-violet-500" },
 };
 const cs = (t) => CAT_STYLE[t] ?? CAT_STYLE.Academic;
@@ -57,14 +58,27 @@ const firstChoice = (c) => {
 /* grades */
 function parseBand(b) {
   if (!b) return [null, null];
-  const g = (x) => (x.toUpperCase() === "K" ? 0 : /^[0-5]$/.test(x) ? Number(x) : null);
-  const m = b.replace(/\s/g, "").match(/^([Kk0-5])-([Kk0-5])$/);
-  if (m) return [g(m[1]), g(m[2])];
-  const one = g(b.trim());
+  const g = (x) => {
+    x = x.trim().toLowerCase();
+    if (x.startsWith("k")) return 0;                 // K, Kinder, Kindergarten
+    const m = x.match(/[0-5]/); return m ? Number(m[0]) : null;  // 1, 2nd, "grade 3"
+  };
+  const parts = String(b).replace(/[–—]/g, "-").split(/\s*(?:-|to|through|thru|&)\s*/i).filter(Boolean);
+  if (parts.length >= 2) {
+    const a = g(parts[0]), z = g(parts[parts.length - 1]);
+    if (a != null && z != null) return [Math.min(a, z), Math.max(a, z)];
+  }
+  const one = g(String(b));
   return one == null ? [null, null] : [one, one];
 }
+// Effective grade span for a class: prefer explicit fields, else re-derive from the band.
+// This is why a K–2 class always covers Kindergarten even if older records never stored gradeFrom.
+function gradeRange(c) {
+  if (c.gradeFrom != null && c.gradeTo != null) return [c.gradeFrom, c.gradeTo];
+  return parseBand(c.band);
+}
 function gradeText(c) {
-  const f = c.gradeFrom, t = c.gradeTo;
+  const [f, t] = gradeRange(c);
   if (f == null || t == null) return c.band || "—";
   return f === t ? GRADES[f] : `${GRADES[f]}–${GRADES[t]}`;
 }
@@ -160,8 +174,17 @@ function seedMusic(season) {
   return { ...season, musicSeeded: true, classes: [...musicClasses, ...(season.classes || [])] };
 }
 const uniq = (a) => [...new Set(a)];
+const MUSIC_NAMES = new Set((HISTORICAL_RAW.find((s) => s.yearLong)?.classes || []).map((c) => c.name));
 function prepareSeason(season) {
   let s = seedMusic(season);
+  // Migration: music now has its own type + its own season (single source of truth).
+  if (s.kind === "music" && !s.musicRetyped) {
+    s = { ...s, musicRetyped: true, classes: s.classes.map((c) => (MUSIC_NAMES.has(c.name) && c.type !== "Music" ? { ...c, type: "Music" } : c)) };
+  }
+  if (s.kind !== "music" && !s.musicMovedOut) {
+    // Drop stale auto-seeded music copies from the enrichment season; the Music season now supplies them.
+    s = { ...s, musicMovedOut: true, classes: (s.classes || []).filter((c) => !MUSIC_NAMES.has(c.name)) };
+  }
   if (!s.rooms) s = { ...s, rooms: uniq([...PREFERRED_ROOMS, ...KNOWN_ROOMS]) };
   if (!s.roomsMigrated) s = { ...s, roomsMigrated: true, rooms: uniq([...(s.rooms || []), ...PREFERRED_ROOMS]) };
   return s;
@@ -480,36 +503,35 @@ function RoomRow({ name, onRename, onRemove }) {
   );
 }
 
-function InsightsPanels({ classes, rooms, onRooms, onRename, canEdit }) {
+const DayHead = ({ extra }) => (
+  <div className="grid" style={{ gridTemplateColumns: `150px repeat(5, minmax(0, 1fr))${extra || ""}` }}>
+    <div />{DAYS.map((d) => <div key={d} className="pb-2 text-center text-sm font-semibold text-slate-600">{d}</div>)}
+    {extra && <div className="pb-2 text-center text-xs font-semibold text-slate-400">Week</div>}
+  </div>
+);
+
+/* Rooms tab: availability grid (by tier) + the full editable room list. */
+function RoomsView({ classes, rooms, onRooms, onRename, canEdit }) {
   const [newRoom, setNewRoom] = useState("");
   const used = [...new Set(classes.map((c) => c.room).filter(Boolean))];
   const allRooms = [...new Set([...(rooms || []), ...used])].sort(byTier);
   const conflicts = roomConflicts(classes);
   const conflictIds = new Set();
   conflicts.forEach(([a, b]) => { conflictIds.add(a.id); conflictIds.add(b.id); });
-
   const addRoom = () => { const r = newRoom.trim(); if (r && !(rooms || []).some((x) => sameRoom(x, r))) onRooms([...(rooms || []), r]); setNewRoom(""); };
   const removeRoom = (i) => onRooms(rooms.filter((_, x) => x !== i));
 
-  const dayHead = (extra) => (
-    <div className="grid" style={{ gridTemplateColumns: `150px repeat(5, minmax(0, 1fr))${extra || ""}` }}>
-      <div />{DAYS.map((d) => <div key={d} className="pb-2 text-center text-sm font-semibold text-slate-600">{d}</div>)}
-      {extra && <div className="pb-2 text-center text-xs font-semibold text-slate-400">Week</div>}
-    </div>
-  );
-
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      {/* room availability — full width */}
-      <div className={CARD + " p-4 lg:col-span-2"}>
-        <SectionHead icon={DoorOpen} title="Room availability" hint="Rooms grouped by your preference tiers. Green means free that day; red means a double-booking." />
+    <div className="space-y-4">
+      <div className={CARD + " p-4"}>
+        <SectionHead icon={DoorOpen} title="Room availability" hint="Rooms grouped by your preference tiers. Green means free that day; red is a double-booking." />
         {conflicts.length > 0 && (
           <ul className="mb-3 space-y-0.5 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-600">
             {conflicts.map(([a, b], i) => <li key={i}>“{a.name}” &amp; “{b.name}” — {a.room}, {a.day} ({fmtTime(a.start)}–{fmtTime(a.end)} vs {fmtTime(b.start)}–{fmtTime(b.end)})</li>)}
           </ul>
         )}
         <div className="overflow-x-auto"><div style={{ minWidth: 720 }}>
-          {dayHead()}
+          <DayHead />
           {allRooms.length === 0 && <p className="py-2 text-sm text-slate-400">No rooms yet.</p>}
           {allRooms.map((room, idx) => {
             const tier = roomTier(room);
@@ -537,16 +559,45 @@ function InsightsPanels({ classes, rooms, onRooms, onRename, canEdit }) {
         </div></div>
       </div>
 
-      {/* grade coverage */}
+      <div className={CARD + " p-4"}>
+        <SectionHead icon={LayoutGrid} title="All rooms" hint={canEdit ? "Every room you can assign, grouped by tier. Renaming one updates every class using it." : "Every room, grouped by preference tier."} />
+        {canEdit ? (
+          <>
+            <div className="grid max-w-2xl gap-1.5 sm:grid-cols-2">
+              {(rooms || []).slice().sort(byTier).map((r) => {
+                const i = rooms.indexOf(r);
+                return <RoomRow key={r + i} name={r} onRename={onRename} onRemove={() => removeRoom(i)} />;
+              })}
+              {(rooms || []).length === 0 && <p className="text-sm text-slate-400">No rooms yet.</p>}
+            </div>
+            <div className="mt-3 flex max-w-sm gap-2">
+              <input className={INPUT} placeholder="Add a room…" value={newRoom} onChange={(e) => setNewRoom(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addRoom()} />
+              <button onClick={addRoom} className={BTN}>Add</button>
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {allRooms.map((r) => <span key={r} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-sm text-slate-600"><span className="rounded bg-slate-100 px-1 text-xs text-slate-400">{TIER_LABELS[roomTier(r)]}</span>{r}</span>)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Insights tab: grade coverage + category balance. */
+function CoveragePanel({ classes }) {
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
       <div className={CARD + " p-4"}>
         <SectionHead icon={GraduationCap} title="Grade coverage" hint="Green where at least one class that day includes that grade." />
         <div className="overflow-x-auto"><div style={{ minWidth: 380 }}>
-          {dayHead()}
+          <DayHead />
           {GRADES.map((g, gi) => (
             <div key={g} className="grid border-t border-slate-100" style={{ gridTemplateColumns: "150px repeat(5, minmax(0, 1fr))" }}>
               <div className="flex items-center py-2 pr-2 text-sm font-medium text-slate-600">Grade {g}</div>
               {DAYS.map((day) => {
-                const ok = classes.some((c) => c.day === day && c.gradeFrom != null && c.gradeTo != null && gi >= c.gradeFrom && gi <= c.gradeTo);
+                const ok = classes.some((c) => { const [gf, gt] = gradeRange(c); return c.day === day && gf != null && gt != null && gi >= gf && gi <= gt; });
                 return (
                   <div key={day} className="flex items-center justify-center border-l border-slate-100 py-2">
                     {ok ? <span className="grid h-5 w-5 place-items-center rounded-full bg-emerald-100 text-emerald-600"><Check size={12} /></span>
@@ -559,11 +610,10 @@ function InsightsPanels({ classes, rooms, onRooms, onRename, canEdit }) {
         </div></div>
       </div>
 
-      {/* category balance */}
       <div className={CARD + " p-4"}>
         <SectionHead icon={Scale} title="Category balance" hint="Classes per category each day, with the week's total. Zeros flag thin spots." />
         <div className="overflow-x-auto"><div style={{ minWidth: 420 }}>
-          {dayHead(" 64px")}
+          <DayHead extra=" 64px" />
           {CATS.map((cat) => {
             const total = classes.filter((c) => c.type === cat).length;
             return (
@@ -579,24 +629,94 @@ function InsightsPanels({ classes, rooms, onRooms, onRename, canEdit }) {
           })}
         </div></div>
       </div>
+    </div>
+  );
+}
 
-      {/* rooms manager */}
-      {canEdit && (
-        <div className={CARD + " p-4 lg:col-span-2"}>
-          <SectionHead icon={DoorOpen} title="Rooms" hint="Rooms you can assign to a class. Renaming one updates every class using it." />
-          <div className="grid max-w-2xl gap-1.5 sm:grid-cols-2">
-            {(rooms || []).slice().sort(byTier).map((r) => {
-              const i = rooms.indexOf(r);
-              return <RoomRow key={r + i} name={r} onRename={onRename} onRemove={() => removeRoom(i)} />;
-            })}
-            {(rooms || []).length === 0 && <p className="text-sm text-slate-400">No rooms yet.</p>}
-          </div>
-          <div className="mt-3 flex max-w-sm gap-2">
-            <input className={INPUT} placeholder="Add a room…" value={newRoom} onChange={(e) => setNewRoom(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addRoom()} />
-            <button onClick={addRoom} className={BTN}>Add</button>
-          </div>
+/* Feedback tab (signed-in only): parent feedback per class — vendor, season, rating, comments. */
+function Stars({ rating }) {
+  if (rating == null) return <span className="text-xs text-slate-400">no rating</span>;
+  return (
+    <span className="inline-flex items-center gap-0.5" title={`${rating} out of 5`}>
+      {[1, 2, 3, 4, 5].map((i) => <Star key={i} size={13} className={i <= Math.round(rating) ? "fill-amber-400 text-amber-400" : "text-slate-200"} />)}
+      <span className="ml-1 text-xs font-semibold text-slate-600">{rating.toFixed(1)}</span>
+    </span>
+  );
+}
+function FeedbackCard({ f }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={CARD + " p-4"}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-sm font-semibold text-slate-800">{f.name}</span>
+        <Stars rating={f.rating} />
+        <span className="text-xs text-slate-400">{f.responses} response{f.responses === 1 ? "" : "s"}</span>
+        {f.wouldRepeat != null && <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-700">{f.wouldRepeat}% would repeat</span>}
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+        <span className="flex items-center gap-1"><Store size={12} /> {f.vendor || "vendor not recorded"}</span>
+        <span className="flex items-center gap-1"><History size={12} /> {f.seasons.join(", ")}</span>
+      </div>
+      {f.comments.length > 0 && (
+        <>
+          <button onClick={() => setOpen((o) => !o)} className="mt-2 flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700">
+            <MessageSquare size={12} /> {f.comments.length} comment{f.comments.length === 1 ? "" : "s"} <ChevronDown size={12} className={open ? "rotate-180 transition" : "transition"} />
+          </button>
+          {open && (
+            <ul className="mt-2 space-y-2 border-t border-slate-100 pt-2">
+              {f.comments.map((c, i) => (
+                <li key={i} className="text-sm text-slate-600">
+                  <span className="mr-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">{c.season}{c.rating ? ` · ★${c.rating}` : ""}</span>
+                  “{c.text}”
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+function FeedbackView() {
+  const [q, setQ] = useState("");
+  const [rows, setRows] = useState(null);   // null = loading
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!supabaseEnabled) { setRows([]); return; }
+      const { data, error } = await supabase.from("class_feedback").select("*").order("rating", { ascending: false });
+      if (!alive) return;
+      if (error) { setErr(error.message); setRows([]); }
+      else setRows((data || []).map((r) => ({ ...r, wouldRepeat: r.would_repeat, comments: r.comments || [] })));
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const ql = q.trim().toLowerCase();
+  const list = rows || [];
+  const shown = list.filter((f) => !ql || f.name.toLowerCase().includes(ql) || (f.vendor || "").toLowerCase().includes(ql) || (f.comments || []).some((c) => (c.text || "").toLowerCase().includes(ql)));
+
+  return (
+    <div className="space-y-4">
+      <div className={CARD + " p-4"}>
+        <SectionHead icon={MessageSquare} title="Parent feedback by class" hint="From the Fall 2025 and Winter 2026 family surveys. Private to signed-in staff; parent names and contact details removed." />
+        <div className="relative max-w-md">
+          <Search size={15} className="pointer-events-none absolute left-3 top-2.5 text-slate-400" />
+          <input className={INPUT + " pl-9"} placeholder="Search class, vendor, or a comment…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+      </div>
+      {rows === null && <p className="py-10 text-center text-slate-400">Loading feedback…</p>}
+      {err && <div className={CARD + " p-4 text-sm text-red-600"}>Couldn't load feedback: {err}</div>}
+      {rows !== null && !err && list.length === 0 && (
+        <div className={CARD + " p-4 text-sm text-slate-500"}>
+          No feedback loaded yet. Run the one-time <code className="rounded bg-slate-100 px-1">feedback_seed.sql</code> in your Supabase SQL editor to populate the private staff-only table.
         </div>
       )}
+      <div className="grid gap-3 lg:grid-cols-2">
+        {shown.map((f) => <FeedbackCard key={f.id ?? f.name} f={f} />)}
+      </div>
+      {rows !== null && list.length > 0 && shown.length === 0 && <p className="py-10 text-center text-slate-400">No feedback matches “{q}”.</p>}
     </div>
   );
 }
@@ -909,18 +1029,30 @@ export default function EnrichmentBoard() {
   const editableSeasons = data.seasons.filter((s) => s.editable);
   const firstEditable = editableSeasons[0];
   const season = data.seasons.find((s) => s.id === data.activeSeasonId) || firstEditable || data.seasons[data.seasons.length - 1];
-  const classes = season.classes;
   const isCurrent = season.editable;
   const canEdit = isCurrent && (!supabaseEnabled || !!session);
+
+  // Music is a single source of truth (the music-planning season). It shows on its own
+  // page AND merges into the enrichment board's Music row, so cards stay in sync.
+  const musicSeason = data.seasons.find((s) => s.editable && s.kind === "music");
+  const musicIds = new Set((musicSeason?.classes || []).map((c) => c.id));
+  const mergeMusic = isCurrent && season.kind !== "music" && musicSeason;
+  const classes = mergeMusic ? [...season.classes, ...musicSeason.classes] : season.classes;
+  const ownerId = (id) => (musicSeason && musicIds.has(id) ? musicSeason.id : season.id);
+
   const conflicts = roomConflicts(classes);
   const conflictIds = new Set();
   conflicts.forEach(([a, b]) => { conflictIds.add(a.id); conflictIds.add(b.id); });
 
-  const setClasses = (updater) => setData((d) => ({ ...d, seasons: d.seasons.map((s) => (s.id === season.id ? { ...s, classes: updater(s.classes) } : s)) }));
-  const upsert = (c) => { setClasses((list) => (list.some((x) => x.id === c.id) ? list.map((x) => (x.id === c.id ? c : x)) : [...list, { ...c, id: genId() }])); setForm(null); };
-  const remove = (id) => { if (window.confirm("Delete this class?")) setClasses((list) => list.filter((x) => x.id !== id)); };
-  const toggleConfirm = (id) => setClasses((list) => list.map((c) => (c.id === id ? { ...c, status: c.status === "confirmed" ? "proposed" : "confirmed" } : c)));
-  const setClassVendors = (id, vendors) => setClasses((list) => list.map((c) => (c.id === id ? { ...c, vendors } : c)));
+  const updateSeason = (sid, updater) => setData((d) => ({ ...d, seasons: d.seasons.map((s) => (s.id === sid ? { ...s, classes: updater(s.classes) } : s)) }));
+  const upsert = (c) => {
+    if (c.id) updateSeason(ownerId(c.id), (list) => list.map((x) => (x.id === c.id ? c : x)));
+    else { const sid = c.type === "Music" && musicSeason ? musicSeason.id : season.id; updateSeason(sid, (list) => [...list, { ...c, id: genId() }]); }
+    setForm(null);
+  };
+  const remove = (id) => { if (window.confirm("Delete this class?")) updateSeason(ownerId(id), (list) => list.filter((x) => x.id !== id)); };
+  const toggleConfirm = (id) => updateSeason(ownerId(id), (list) => list.map((c) => (c.id === id ? { ...c, status: c.status === "confirmed" ? "proposed" : "confirmed" } : c)));
+  const setClassVendors = (id, vendors) => updateSeason(ownerId(id), (list) => list.map((c) => (c.id === id ? { ...c, vendors } : c)));
   const setSeasonRooms = (rooms) => setData((d) => ({ ...d, seasons: d.seasons.map((s) => (s.id === season.id ? { ...s, rooms } : s)) }));
   const renameRoom = (oldName, newName) => {
     const nn = newName.trim(); if (!nn) return;
@@ -931,11 +1063,17 @@ export default function EnrichmentBoard() {
       return { ...s, rooms, classes: cls };
     }) }));
   };
-  const dropCell = (day, type) => { if (dragId) setClasses((list) => list.map((c) => (c.id === dragId ? { ...c, day, type } : c))); setDragId(null); };
+  const dropCell = (day, type) => {
+    if (!dragId) { setDragId(null); return; }
+    if (musicIds.has(dragId)) updateSeason(musicSeason.id, (list) => list.map((c) => (c.id === dragId ? { ...c, day } : c)));  // music stays Music
+    else if (type !== "Music") updateSeason(season.id, (list) => list.map((c) => (c.id === dragId ? { ...c, day, type } : c)));
+    setDragId(null);
+  };
   const blank = (day, type) => ({ name: "", type: type || "Art", gradeFrom: 0, gradeTo: 5, day: day || "Mon", start: "16:00", end: "17:00", room: "", status: "proposed", vendors: [] });
   const addToCell = (day, type) => setForm(blank(day, type));
 
   const needVendor = canEdit ? classes.filter((c) => (c.vendors || []).length === 0).length : 0;
+  const roomsForForm = uniq([...(season.rooms || []), ...(mergeMusic ? (musicSeason.rooms || []) : [])]);
 
   const TabBtn = ({ id, icon: Icon, label, badge }) => (
     <button onClick={() => setTab(id)} className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold transition ${tab === id ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}>
@@ -998,7 +1136,10 @@ export default function EnrichmentBoard() {
           <>
             <div className="mb-5 inline-flex flex-wrap rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
               <TabBtn id="plan" icon={LayoutGrid} label="Plan" badge={conflicts.length} />
+              <TabBtn id="rooms" icon={DoorOpen} label="Rooms" badge={conflicts.length} />
+              <TabBtn id="insights" icon={Scale} label="Insights" />
               <TabBtn id="vendors" icon={Store} label="Vendors" badge={needVendor} />
+              <TabBtn id="feedback" icon={MessageSquare} label="Feedback" />
               <TabBtn id="season" icon={CheckCircle2} label="Season" />
               <TabBtn id="share" icon={Share2} label="Share" />
             </div>
@@ -1007,7 +1148,7 @@ export default function EnrichmentBoard() {
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     {conflicts.length > 0 && (
-                      <span className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700"><AlertTriangle size={15} /> {conflicts.length} room conflict{conflicts.length > 1 ? "s" : ""}</span>
+                      <span className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700"><AlertTriangle size={15} /> {conflicts.length} room conflict{conflicts.length > 1 ? "s" : ""} — see the Rooms tab</span>
                     )}
                   </div>
                   <button onClick={() => setForm(blank())} className={BTN}><Plus size={15} /> Add class</button>
@@ -1015,27 +1156,39 @@ export default function EnrichmentBoard() {
                 <div className={CARD + " p-4"}>
                   {classes.length === 0 && <p className="mb-2 text-center text-sm text-slate-400">Empty season — add classes into the day / activity cells below to start planning.</p>}
                   <PlanBoard classes={classes} conflictIds={conflictIds} setDragId={setDragId} onDropCell={dropCell} onAdd={addToCell} onEdit={setForm} onDelete={remove} onToggleConfirm={toggleConfirm} />
+                  {mergeMusic && <p className="mt-2 text-xs text-slate-400">The Music row is shared with the Music 2026–27 season — edits sync to both.</p>}
                 </div>
-                <InsightsPanels classes={classes} rooms={season.rooms || []} onRooms={setSeasonRooms} onRename={renameRoom} canEdit />
               </div>
             )}
+            {tab === "rooms" && <RoomsView classes={classes} rooms={season.rooms || []} onRooms={setSeasonRooms} onRename={renameRoom} canEdit />}
+            {tab === "insights" && <CoveragePanel classes={classes} />}
             {tab === "vendors" && <VendorsView classes={classes} onClassVendors={setClassVendors} onEdit={setForm} />}
+            {tab === "feedback" && <FeedbackView />}
             {tab === "season" && <SeasonView classes={classes} />}
             {tab === "share" && <ShareView classes={classes} seasonName={season.name} />}
           </>
         ) : (
-          <div className="space-y-4">
-            {signInBar}
-            <div className={CARD + " p-4"}>
-              {classes.length === 0 && <p className="mb-2 text-center text-sm text-slate-400">This season doesn't have any classes yet.</p>}
-              <PlanBoard classes={classes} readOnly />
+          <>
+            <div className="mb-4">{signInBar}</div>
+            <div className="mb-5 inline-flex flex-wrap rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+              <TabBtn id="plan" icon={LayoutGrid} label="Plan" />
+              <TabBtn id="rooms" icon={DoorOpen} label="Rooms" />
+              <TabBtn id="insights" icon={Scale} label="Insights" />
             </div>
-            <InsightsPanels classes={classes} rooms={season.rooms || []} onRooms={() => {}} onRename={() => {}} canEdit={false} />
-          </div>
+            {tab === "vendors" || tab === "feedback" || tab === "season" || tab === "share" ? <p className="text-sm text-slate-400">Sign in to view this.</p> : null}
+            {tab === "plan" && (
+              <div className={CARD + " p-4"}>
+                {classes.length === 0 && <p className="mb-2 text-center text-sm text-slate-400">This season doesn't have any classes yet.</p>}
+                <PlanBoard classes={classes} readOnly />
+              </div>
+            )}
+            {tab === "rooms" && <RoomsView classes={classes} rooms={season.rooms || []} onRooms={() => {}} onRename={() => {}} canEdit={false} />}
+            {tab === "insights" && <CoveragePanel classes={classes} />}
+          </>
         )}
       </div>
 
-      {form && <ClassForm initial={form} onSave={upsert} onClose={() => setForm(null)} rooms={season.rooms || KNOWN_ROOMS} />}
+      {form && <ClassForm initial={form} onSave={upsert} onClose={() => setForm(null)} rooms={roomsForForm.length ? roomsForForm : KNOWN_ROOMS} />}
     </div>
   );
 }
