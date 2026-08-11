@@ -589,6 +589,8 @@ function RoomsView({ classes, rooms, onRooms, onRename, canEdit }) {
 
 /* Insights tab: grade coverage + category balance. */
 function CoveragePanel({ classes }) {
+  const gradeCounts = GRADES.map((g, gi) => classes.filter((c) => { const [gf, gt] = gradeRange(c); return gf != null && gt != null && gi >= gf && gi <= gt; }).length);
+  const maxGrade = Math.max(1, ...gradeCounts);
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <div className={CARD + " p-4"}>
@@ -630,6 +632,27 @@ function CoveragePanel({ classes }) {
             );
           })}
         </div></div>
+      </div>
+
+      <div className={CARD + " p-4 lg:col-span-2"}>
+        <SectionHead icon={GraduationCap} title="Classes per grade" hint="How many classes each grade can enroll in across the week. A K–5 class counts for every grade." />
+        <div className="space-y-2">
+          {GRADES.map((g, gi) => {
+            const n = gradeCounts[gi];
+            const pct = n > 0 ? Math.max(Math.round((100 * n) / maxGrade), 6) : 0;
+            return (
+              <div key={g} className="flex items-center gap-3">
+                <div className="w-16 shrink-0 text-sm font-medium text-slate-600">Grade {g}</div>
+                <div className="h-6 flex-1 overflow-hidden rounded-lg bg-slate-100">
+                  <div className="flex h-full items-center rounded-lg bg-indigo-500 px-2" style={{ width: `${pct}%` }}>
+                    {n > 0 && <span className="text-xs font-semibold text-white">{n}</span>}
+                  </div>
+                </div>
+                {n === 0 && <span className="text-xs font-medium text-red-400">no options</span>}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
