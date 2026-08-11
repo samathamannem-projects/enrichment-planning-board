@@ -3,8 +3,10 @@ import {
   LayoutGrid, Store, CheckCircle2, Share2, Plus, Pencil, Trash2, X, Check, Clock,
   MapPin, AlertTriangle, ArrowUp, Printer, Copy, Star, ChevronRight, History, User,
   Lock, LogOut, Cloud, Music, DoorOpen, GraduationCap, Scale, MessageSquare, Search, ChevronDown,
+  CalendarDays, Flag,
 } from "lucide-react";
 import { HISTORICAL_RAW } from "./historicalSeasons.js";
+import { SEASON_DATES } from "./seasonDates.js";
 import { supabase, supabaseEnabled } from "./supabaseClient.js";
 
 /* ---------------- constants ---------------- */
@@ -721,7 +723,103 @@ function FeedbackView() {
   );
 }
 
-/* ---------------- vendors ---------------- */
+/* ---------------- dates ---------------- */
+const parseISO = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+const fmtDate = (s) => parseISO(s).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+const todayMid = () => { const t = new Date(); t.setHours(0, 0, 0, 0); return t; };
+const daysUntil = (s) => Math.round((parseISO(s) - todayMid()) / 86400000);
+const relText = (s) => { const n = daysUntil(s); return n === 0 ? "today" : n > 0 ? `in ${n} day${n === 1 ? "" : "s"}` : `${-n} day${n === -1 ? "" : "s"} ago`; };
+const relStyle = (s) => { const n = daysUntil(s); return n < 0 ? "bg-slate-100 text-slate-400" : n === 0 ? "bg-indigo-100 text-indigo-700" : n <= 14 ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"; };
+function datesForSeason(season) {
+  if (!season) return null;
+  if (season.kind === "music") return { ...SEASON_DATES.music, kind: "music" };
+  const w = (season.name || "").split(" ")[0].toLowerCase(); // Fall / Winter / Spring
+  return SEASON_DATES.enrichment.find((s) => s.name.toLowerCase().includes(w)) || SEASON_DATES.enrichment[0];
+}
+
+function DatesView({ season }) {
+  const list = [
+    ...SEASON_DATES.enrichment.map((s) => ({ ...s, kind: "enrichment" })),
+    { ...SEASON_DATES.music, kind: "music" },
+  ];
+  const start = (() => {
+    if (season?.kind === "music") return list.length - 1;
+    const w = (season?.name || "").split(" ")[0].toLowerCase();
+    const i = list.findIndex((s) => s.name.toLowerCase().includes(w));
+    return i >= 0 ? i : 0;
+  })();
+  const [idx, setIdx] = useState(start);
+  const s = list[idx];
+  const events = (s.flags || []).filter((f) => f.type === "event").sort((a, b) => (a.weekOf || "").localeCompare(b.weekOf || ""));
+  const noClass = (s.flags || []).filter((f) => f.type === "noclass").sort((a, b) => (a.weekOf || "").localeCompare(b.weekOf || ""));
+  const flagDate = (f) => (f.dates && f.dates.length ? f.dates.map(fmtDate).join(", ") : f.weekOf ? `week of ${fmtDate(f.weekOf)}` : "");
+
+  return (
+    <div className="space-y-4">
+      <div className="inline-flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+        {list.map((x, i) => (
+          <button key={x.name} onClick={() => setIdx(i)} className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${i === idx ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
+            {x.name.replace("Enrichment ", "")}
+          </button>
+        ))}
+      </div>
+
+      <div className={CARD + " p-4"}>
+        <SectionHead icon={CalendarDays} title="Planning milestones" hint="Key prep dates for this season. Times shown relative to today." />
+        <ul className="divide-y divide-slate-100">
+          {(s.milestones || []).map((m, i) => (
+            <li key={i} className="flex items-center gap-3 py-2">
+              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-indigo-50 text-indigo-600"><Flag size={14} /></span>
+              <span className="text-sm font-medium text-slate-700">{m.label}</span>
+              <span className="text-sm text-slate-500">{fmtDate(m.date)}</span>
+              <span className={`ml-auto rounded-md px-2 py-0.5 text-xs font-semibold ${relStyle(m.date)}`}>{relText(m.date)}</span>
+            </li>
+          ))}
+          {(s.milestones || []).length === 0 && <li className="py-2 text-sm text-slate-400">No milestones recorded.</li>}
+        </ul>
+        {s.start && <p className="mt-2 text-xs text-slate-400">Calendar starts {fmtDate(s.start)}.</p>}
+      </div>
+
+      {s.sessionsPerDay && Object.keys(s.sessionsPerDay).length > 0 && (
+        <div className={CARD + " p-4"}>
+          <SectionHead icon={Clock} title="Sessions per day" hint={`How many times each weekday actually meets across the ${s.weeks || ""}-week session, after no-class days.`} />
+          <div className="flex flex-wrap gap-2">
+            {["Mon", "Tue", "Wed", "Thu", "Fri"].map((d) => (
+              <span key={d} className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-600"><span className="font-semibold text-slate-800">{d}</span> · {s.sessionsPerDay[d] ?? "—"} wk</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className={CARD + " p-4"}>
+          <SectionHead icon={AlertTriangle} title="After-school events" hint="School events that could clash with enrichment classes." />
+          {events.length === 0 ? <p className="text-sm text-slate-400">None flagged this season.</p> : (
+            <ul className="space-y-1.5">
+              {events.map((f, i) => (
+                <li key={i} className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" /><span><span className="font-medium">{f.note}</span>{flagDate(f) && <span className="text-amber-600"> — {flagDate(f)}</span>}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className={CARD + " p-4"}>
+          <SectionHead icon={CalendarDays} title="No-class days" hint="Days classes won't meet — holidays, breaks, and buffer weeks." />
+          {noClass.length === 0 ? <p className="text-sm text-slate-400">None flagged this season.</p> : (
+            <ul className="space-y-1.5">
+              {noClass.map((f, i) => (
+                <li key={i} className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  <X size={14} className="mt-0.5 shrink-0 text-slate-400" /><span><span className="font-medium text-slate-700">{f.note}</span>{flagDate(f) && <span className="text-slate-400"> — {flagDate(f)}</span>}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function VendorRow({ v, first, onUpdate, onRemove, onPromote }) {
   const toggleDay = (d) => {
@@ -1074,6 +1172,9 @@ export default function EnrichmentBoard() {
 
   const needVendor = canEdit ? classes.filter((c) => (c.vendors || []).length === 0).length : 0;
   const roomsForForm = uniq([...(season.rooms || []), ...(mergeMusic ? (musicSeason.rooms || []) : [])]);
+  const seasonDates = isCurrent ? datesForSeason(season) : null;
+  const todayStr = new Date().toLocaleDateString("en-CA");
+  const nextMilestone = seasonDates ? (seasonDates.milestones || []).find((m) => m.date >= todayStr) : null;
 
   const TabBtn = ({ id, icon: Icon, label, badge }) => (
     <button onClick={() => setTab(id)} className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold transition ${tab === id ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"}`}>
@@ -1136,6 +1237,7 @@ export default function EnrichmentBoard() {
           <>
             <div className="mb-5 inline-flex flex-wrap rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
               <TabBtn id="plan" icon={LayoutGrid} label="Plan" badge={conflicts.length} />
+              <TabBtn id="dates" icon={CalendarDays} label="Dates" />
               <TabBtn id="rooms" icon={DoorOpen} label="Rooms" badge={conflicts.length} />
               <TabBtn id="insights" icon={Scale} label="Insights" />
               <TabBtn id="vendors" icon={Store} label="Vendors" badge={needVendor} />
@@ -1146,9 +1248,14 @@ export default function EnrichmentBoard() {
             {tab === "plan" && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between gap-2">
-                  <div>
+                  <div className="flex flex-wrap items-center gap-2">
                     {conflicts.length > 0 && (
                       <span className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700"><AlertTriangle size={15} /> {conflicts.length} room conflict{conflicts.length > 1 ? "s" : ""} — see the Rooms tab</span>
+                    )}
+                    {nextMilestone && (
+                      <button onClick={() => setTab("dates")} className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-700">
+                        <CalendarDays size={15} /> Next: {nextMilestone.label} · {fmtDate(nextMilestone.date)} ({relText(nextMilestone.date)})
+                      </button>
                     )}
                   </div>
                   <button onClick={() => setForm(blank())} className={BTN}><Plus size={15} /> Add class</button>
@@ -1160,6 +1267,7 @@ export default function EnrichmentBoard() {
                 </div>
               </div>
             )}
+            {tab === "dates" && <DatesView season={season} />}
             {tab === "rooms" && <RoomsView classes={classes} rooms={season.rooms || []} onRooms={setSeasonRooms} onRename={renameRoom} canEdit />}
             {tab === "insights" && <CoveragePanel classes={classes} />}
             {tab === "vendors" && <VendorsView classes={classes} onClassVendors={setClassVendors} onEdit={setForm} />}
