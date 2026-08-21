@@ -176,6 +176,12 @@ function seedMusic(season) {
   return { ...season, musicSeeded: true, classes: [...musicClasses, ...(season.classes || [])] };
 }
 const uniq = (a) => [...new Set(a)];
+// De-dupe rooms the way sameRoom compares them (case/space-insensitive), keeping the first spelling.
+const uniqRooms = (list) => {
+  const seen = new Set(); const out = [];
+  for (const r of list || []) { if (!r) continue; const k = r.trim().toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(r.trim()); } }
+  return out;
+};
 const MUSIC_NAMES = new Set((HISTORICAL_RAW.find((s) => s.yearLong)?.classes || []).map((c) => c.name));
 function prepareSeason(season) {
   let s = seedMusic(season);
@@ -196,6 +202,10 @@ function combine(editableSeasons, activeSeasonId) {
   let seeded = editableSeasons.map(prepareSeason);
   if (!seeded.some((s) => s.kind === "music")) seeded = [...seeded, prepareSeason(newMusicSeason())];
   if (!seeded.some((s) => s.kind === "enrichment" || !s.kind)) seeded = [prepareSeason(newEnrichmentSeason()), ...seeded];
+  // Rooms are a shared, school-wide list: mirror the union across every editable season so a
+  // room added or removed once applies everywhere (and still persists inside each season).
+  const sharedRooms = uniqRooms(seeded.flatMap((s) => s.rooms || []));
+  seeded = seeded.map((s) => ({ ...s, rooms: sharedRooms }));
   const seasons = [...historicalSeasons(), ...seeded];
   if (!seasons.find((s) => s.id === activeSeasonId)) activeSeasonId = seeded[0]?.id || seasons[0].id;
   return { seasons, activeSeasonId };
@@ -305,7 +315,7 @@ function RoomSelect({ value, rooms, onChange }) {
   return (
     <select className={INPUT} value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">— none —</option>
-      {value && !(rooms || []).includes(value) && <option value={value}>{value}</option>}
+      {value && !(rooms || []).some((r) => sameRoom(r, value)) && <option value={value}>{value}</option>}
       {TIER_LABELS.map((label, ti) => {
         const group = (rooms || []).filter((r) => roomTier(r) === ti).sort((a, b) => a.localeCompare(b));
         return group.length ? <optgroup key={label} label={label}>{group.map((r) => <option key={r} value={r}>{r}</option>)}</optgroup> : null;
@@ -516,7 +526,7 @@ const DayHead = ({ extra }) => (
 function RoomsView({ classes, rooms, onRooms, onRename, canEdit }) {
   const [newRoom, setNewRoom] = useState("");
   const used = [...new Set(classes.map((c) => c.room).filter(Boolean))];
-  const allRooms = [...new Set([...(rooms || []), ...used])].sort(byTier);
+  const allRooms = uniqRooms([...(rooms || []), ...used]).sort(byTier);
   const conflicts = roomConflicts(classes);
   const conflictIds = new Set();
   conflicts.forEach(([a, b]) => { conflictIds.add(a.id); conflictIds.add(b.id); });
@@ -562,7 +572,7 @@ function RoomsView({ classes, rooms, onRooms, onRename, canEdit }) {
       </div>
 
       <div className={CARD + " p-4"}>
-        <SectionHead icon={LayoutGrid} title="All rooms" hint={canEdit ? "Every room you can assign, grouped by tier. Renaming one updates every class using it." : "Every room, grouped by preference tier."} />
+        <SectionHead icon={LayoutGrid} title="All rooms" hint={canEdit ? "Every room you can assign, shared across all seasons. Add or remove here; renaming one updates every class using it." : "Every room, grouped by preference tier."} />
         {canEdit ? (
           <>
             <div className="grid max-w-2xl gap-1.5 sm:grid-cols-2">
@@ -589,8 +599,6 @@ function RoomsView({ classes, rooms, onRooms, onRename, canEdit }) {
 
 /* Insights tab: grade coverage + category balance. */
 function CoveragePanel({ classes }) {
-  const gradeCounts = GRADES.map((g, gi) => classes.filter((c) => { const [gf, gt] = gradeRange(c); return gf != null && gt != null && gi >= gf && gi <= gt; }).length);
-  const maxGrade = Math.max(1, ...gradeCounts);
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <div className={CARD + " p-4"}>
@@ -632,27 +640,6 @@ function CoveragePanel({ classes }) {
             );
           })}
         </div></div>
-      </div>
-
-      <div className={CARD + " p-4 lg:col-span-2"}>
-        <SectionHead icon={GraduationCap} title="Classes per grade" hint="How many classes each grade can enroll in across the week. A K–5 class counts for every grade." />
-        <div className="space-y-2">
-          {GRADES.map((g, gi) => {
-            const n = gradeCounts[gi];
-            const pct = n > 0 ? Math.max(Math.round((100 * n) / maxGrade), 6) : 0;
-            return (
-              <div key={g} className="flex items-center gap-3">
-                <div className="w-16 shrink-0 text-sm font-medium text-slate-600">Grade {g}</div>
-                <div className="h-6 flex-1 overflow-hidden rounded-lg bg-slate-100">
-                  <div className="flex h-full items-center rounded-lg bg-indigo-500 px-2" style={{ width: `${pct}%` }}>
-                    {n > 0 && <span className="text-xs font-semibold text-white">{n}</span>}
-                  </div>
-                </div>
-                {n === 0 && <span className="text-xs font-medium text-red-400">no options</span>}
-              </div>
-            );
-          })}
-        </div>
       </div>
     </div>
   );
@@ -898,6 +885,80 @@ function VendorClassBlock({ c, onClassVendors, show }) {
   );
 }
 
+/* ---------------- school-year calendar ---------------- */
+const CalSwatch = ({ swatch, label }) => (<span className="flex items-center gap-1.5"><span className={`h-3 w-3 rounded border border-slate-300 ${swatch}`} />{label}</span>);
+const CalDot = ({ c, label }) => (<span className="flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-full ${c}`} />{label}</span>);
+
+function CalendarView() {
+  const cal = SEASON_DATES.calendar;
+  const seasonColor = { "Fall 2026": "bg-amber-300 text-amber-900", "Winter 2027": "bg-yellow-100 text-yellow-800", "Spring 2027": "bg-green-200 text-green-900" };
+  const mkColor = { principal: "bg-rose-500", facilitron: "bg-sky-500", rosters: "bg-red-600", open: "bg-emerald-500", close: "bg-emerald-600" };
+  const seasonOf = {}; cal.seasons.forEach((s) => (cal.activity[s] || []).forEach((d) => { seasonOf[d] = s; }));
+  const noSchool = new Set(cal.noSchool);
+  const evByDate = {}; cal.events.forEach((e) => { (evByDate[e.date] = evByDate[e.date] || []).push(e.label); });
+  const mkByDate = {}; cal.markers.forEach((m) => { (mkByDate[m.date] = mkByDate[m.date] || []).push(m); });
+
+  const [fy, fm] = cal.monthsFrom.split("-").map(Number);
+  const [ty, tm] = cal.monthsTo.split("-").map(Number);
+  const months = []; let y = fy, m = fm;
+  while (y < ty || (y === ty && m <= tm)) { months.push([y, m]); m++; if (m > 12) { m = 1; y++; } }
+  const pad = (n) => String(n).padStart(2, "0");
+  const DOW = ["S", "M", "T", "W", "T", "F", "S"];
+
+  return (
+    <div className="space-y-4">
+      <div className={CARD + " p-4"}>
+        <SectionHead icon={CalendarDays} title="School-year calendar" hint="Each season's activity days over 2026–27, with no-school days and key deadlines." />
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-600">
+          <CalSwatch swatch="bg-amber-300" label="Fall 2026" />
+          <CalSwatch swatch="bg-yellow-100" label="Winter 2027" />
+          <CalSwatch swatch="bg-green-200" label="Spring 2027" />
+          <CalSwatch swatch="bg-slate-200" label="No school" />
+          <CalDot c="bg-rose-500" label="Meet w/ Principal" />
+          <CalDot c="bg-sky-500" label="Facilitron" />
+          <CalDot c="bg-red-600" label="Rosters" />
+          <CalDot c="bg-emerald-500" label="Enrollment" />
+          <CalDot c="bg-orange-500" label="After-school event" />
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {months.map(([Y, M]) => {
+          const first = new Date(Y, M - 1, 1).getDay();
+          const dim = new Date(Y, M, 0).getDate();
+          const cells = []; for (let i = 0; i < first; i++) cells.push(null); for (let d = 1; d <= dim; d++) cells.push(d);
+          const title = new Date(Y, M - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+          return (
+            <div key={`${Y}-${M}`} className={CARD + " p-3"}>
+              <div className="mb-1.5 text-sm font-semibold text-slate-700">{title}</div>
+              <div className="grid grid-cols-7 gap-0.5">
+                {DOW.map((d, i) => <div key={"h" + i} className="pb-1 text-center font-semibold text-slate-400" style={{ fontSize: 9 }}>{d}</div>)}
+                {cells.map((d, i) => {
+                  if (d === null) return <div key={i} />;
+                  const iso = `${Y}-${pad(M)}-${pad(d)}`;
+                  const s = seasonOf[iso];
+                  const cls = s ? seasonColor[s] : noSchool.has(iso) ? "bg-slate-200 text-slate-400" : "text-slate-600";
+                  const mks = mkByDate[iso] || []; const evs = evByDate[iso] || [];
+                  const tip = [...mks.map((x) => x.label), ...evs].join(" • ") || undefined;
+                  return (
+                    <div key={i} title={tip} className={`flex h-9 flex-col items-center rounded ${cls}`}>
+                      <span className="mt-1 font-medium leading-none" style={{ fontSize: 11 }}>{d}</span>
+                      <span className="mb-1 mt-auto flex gap-0.5">
+                        {mks.map((mm, j) => <span key={"m" + j} className={`h-1.5 w-1.5 rounded-full ${mkColor[mm.kind] || "bg-slate-500"}`} />)}
+                        {evs.length > 0 && <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- vendors ---------------- */
 function VendorsView({ classes, onClassVendors, onEdit }) {
   const [show, setShow] = useState(() => new Set(V_ORDER));
   const toggle = (s) => setShow((prev) => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n; });
@@ -1174,13 +1235,13 @@ export default function EnrichmentBoard() {
   const remove = (id) => { if (window.confirm("Delete this class?")) updateSeason(ownerId(id), (list) => list.filter((x) => x.id !== id)); };
   const toggleConfirm = (id) => updateSeason(ownerId(id), (list) => list.map((c) => (c.id === id ? { ...c, status: c.status === "confirmed" ? "proposed" : "confirmed" } : c)));
   const setClassVendors = (id, vendors) => updateSeason(ownerId(id), (list) => list.map((c) => (c.id === id ? { ...c, vendors } : c)));
-  const setSeasonRooms = (rooms) => setData((d) => ({ ...d, seasons: d.seasons.map((s) => (s.id === season.id ? { ...s, rooms } : s)) }));
+  const setSeasonRooms = (rooms) => setData((d) => ({ ...d, seasons: d.seasons.map((s) => (s.editable ? { ...s, rooms } : s)) }));
   const renameRoom = (oldName, newName) => {
     const nn = newName.trim(); if (!nn) return;
     setData((d) => ({ ...d, seasons: d.seasons.map((s) => {
-      if (s.id !== season.id) return s;
+      if (!s.editable) return s;
       const rooms = uniq((s.rooms || []).map((r) => (r === oldName ? nn : r)));
-      const cls = s.classes.map((c) => (sameRoom(c.room, oldName) ? { ...c, room: nn } : c));
+      const cls = (s.classes || []).map((c) => (sameRoom(c.room, oldName) ? { ...c, room: nn } : c));
       return { ...s, rooms, classes: cls };
     }) }));
   };
@@ -1194,7 +1255,7 @@ export default function EnrichmentBoard() {
   const addToCell = (day, type) => setForm(blank(day, type));
 
   const needVendor = canEdit ? classes.filter((c) => (c.vendors || []).length === 0).length : 0;
-  const roomsForForm = uniq([...(season.rooms || []), ...(mergeMusic ? (musicSeason.rooms || []) : [])]);
+  const roomsForForm = uniqRooms([...(season.rooms || []), ...(mergeMusic ? (musicSeason.rooms || []) : [])]);
   const seasonDates = isCurrent ? datesForSeason(season) : null;
   const todayStr = new Date().toLocaleDateString("en-CA");
   const nextMilestone = seasonDates ? (seasonDates.milestones || []).find((m) => m.date >= todayStr) : null;
@@ -1260,7 +1321,8 @@ export default function EnrichmentBoard() {
           <>
             <div className="mb-5 inline-flex flex-wrap rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
               <TabBtn id="plan" icon={LayoutGrid} label="Plan" badge={conflicts.length} />
-              <TabBtn id="dates" icon={CalendarDays} label="Dates" />
+              <TabBtn id="calendar" icon={CalendarDays} label="Calendar" />
+              <TabBtn id="dates" icon={Flag} label="Dates" />
               <TabBtn id="rooms" icon={DoorOpen} label="Rooms" badge={conflicts.length} />
               <TabBtn id="insights" icon={Scale} label="Insights" />
               <TabBtn id="vendors" icon={Store} label="Vendors" badge={needVendor} />
@@ -1290,6 +1352,7 @@ export default function EnrichmentBoard() {
                 </div>
               </div>
             )}
+            {tab === "calendar" && <CalendarView />}
             {tab === "dates" && <DatesView season={season} />}
             {tab === "rooms" && <RoomsView classes={classes} rooms={season.rooms || []} onRooms={setSeasonRooms} onRename={renameRoom} canEdit />}
             {tab === "insights" && <CoveragePanel classes={classes} />}
